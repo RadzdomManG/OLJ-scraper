@@ -129,3 +129,16 @@ def main():
 if __name__ == "__main__":
     main()
 
+from flask import Flask
+app = Flask(__name__)
+
+@app.route("/")
+def index():
+    return "Watcher alive!"
+
+if __name__ == "__main__":
+    import threading
+    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=10000)).start()
+    main()  # run your watcher
+
+
