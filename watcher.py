@@ -130,18 +130,24 @@ def fetch_jobs(site):
 
     elif site["type"] == "freelancer":
         for job_card in soup.select("div.JobSearchCard-item"):
-            a = job_card.select_one("a")
+            a = job_card.select_one("a[data-item='job-title-link']")
             if not a:
                 continue
             href = a.get("href")
             job_id = href.split("/")[-1]
             title = a.get_text(strip=True)
             url_full = "https://www.freelancer.ph" + href
-            combined_text = title.lower()  # Freelancer doesn’t give detailed description easily
+
+            # Get description snippet if available
+            desc_tag = job_card.select_one("p.JobSearchCard-description")
+            description = desc_tag.get_text(" ", strip=True) if desc_tag else ""
+
+            combined_text = f"{title} {description}".lower()
             if keyword_match(combined_text):
                 jobs[job_id] = {
                     "title": f"[Freelancer] {title}",
-                    "url": url_full
+                    "url": url_full,
+                    "description": description
                 }
 
     return jobs
@@ -155,7 +161,6 @@ def main():
     seen = load_seen_jobs()
     last_heartbeat = 0
 
-    # Send startup notification using first site's Pushover
     send_push("🟢 Watcher started successfully", "Watcher Status",
               pushover_user=JOB_SITES[0]["pushover_user"],
               pushover_token=JOB_SITES[0]["pushover_token"],
@@ -179,8 +184,9 @@ def main():
 
         if new_jobs_all:
             for job, site in new_jobs_all:
+                desc_snippet = job.get('description', '')[:200]
                 send_push(
-                    f"🔥 {job['title']}\n{job['url']}",
+                    f"🔥 {job['title']}\n{desc_snippet}\n{job['url']}",
                     title=f"New Job from {site['name']}",
                     pushover_user=site["pushover_user"],
                     pushover_token=site["pushover_token"],
