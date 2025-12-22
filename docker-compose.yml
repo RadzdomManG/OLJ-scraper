@@ -1,0 +1,11 @@
+services:
+  onlinejobs-watcher:
+    build: .
+    container_name: onlinejobs-watcher
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data    # persist seen_jobs.json
+    environment:
+      - CHECK_INTERVAL_SECONDS=30   # optional, override config.py
+    tty: true   # keeps logs interactive
+

@@ -1,0 +1,11 @@
+# OnlineJobsPH Watcher Config
+
+JOB_URL = "https://www.onlinejobs.ph/jobseekers/jobsearch"
+CHECK_INTERVAL_SECONDS = 180  # 3 minutes
+KEYWORDS = ["data entry"]  # Only notify on these job titles
+
+# Pushover
+PUSHOVER_USER_KEY = "u6ckbmp23xewib4aenxto4ozzkxdrh"
+PUSHOVER_API_TOKEN = "ao75gi1uday5j316o26x2s2nuaewf5"
+DEVICE_NAME = "Rn13pp"
+
