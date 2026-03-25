@@ -1,4 +1,7 @@
 requests
 beautifulsoup4
 lxml
+flask
+tzdata
+pywebview
 

@@ -1,0 +1,482 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RADZ OLJ SCRAPER</title>
+  <style>
+    :root { --bg:#050816; --panel:#0f1733; --panel2:#0b1230; --line:#2a3f83; --text:#eaf3ff; --muted:#9cb4ff; --btn:#141f45; --btnline:#3552b5; --new:#d9ffec; --old:#fff0cb; --red:#ffd8db; --th:#0d163a; --thline:#304a9f; --td:#0a1229; --accent:#39d5ff; --accent2:#7bffbf; --accent3:#ffc66d; --hot:#ff4fd8; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Segoe UI", "Trebuchet MS", Tahoma, sans-serif; color: var(--text); background:
+      radial-gradient(circle at 18% 0%, rgba(57,213,255,.22) 0%, rgba(57,213,255,0) 32%),
+      radial-gradient(circle at 82% 8%, rgba(255,79,216,.18) 0%, rgba(255,79,216,0) 30%),
+      linear-gradient(180deg, #040714 0%, #070d24 42%, #090f28 100%); }
+    .app { max-width: 1880px; margin: 0 auto; padding: 12px; display: grid; gap: 10px; }
+    .panel { background: linear-gradient(180deg,var(--panel) 0%,var(--panel2) 100%); border: 1px solid var(--line); border-radius: 12px; box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 28px rgba(0,0,0,.38), 0 0 0 1px rgba(57,213,255,.06); }
+    .text-link { border: 0; background: transparent; color: #9cc6ff; text-decoration: underline; cursor: pointer; padding: 0; font-size: 14px; }
+    .header { padding: 12px; display: grid; gap: 9px; }
+    .title { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    h1 { margin: 0; font-size: 36px; line-height: 1; letter-spacing: .7px; text-transform: uppercase; background: linear-gradient(90deg, #d7f6ff, #7bffbf 40%, #ff89e8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-shadow: 0 0 24px rgba(57,213,255,.2); }
+    .subtitle { color: #c5d7ff; font-size: 13px; border: 1px solid #3f5dc2; border-radius: 999px; padding: 4px 12px; background: linear-gradient(90deg, rgba(57,213,255,.15), rgba(255,79,216,.12)); }
+    .controls,.status,.ages { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .btn { border: 1px solid var(--btnline); border-radius: 9px; background: linear-gradient(180deg, #1b2b63 0%, var(--btn) 100%); color: #e9f2ff; font-size: 13px; font-weight: 700; padding: 7px 12px; cursor: pointer; transition: transform .12s ease, filter .18s ease, box-shadow .18s ease; box-shadow: 0 0 0 0 rgba(57,213,255,0); }
+    .btn:active { transform: translateY(1px) scale(.99); }
+    .btn:hover { filter: brightness(1.11); box-shadow: 0 0 18px rgba(57,213,255,.22); }
+    .btn.start { background: linear-gradient(180deg, #1f7a4a, #185e3a); border-color: #3ccf88; }
+    .btn.stop { background: linear-gradient(180deg, #923245, #6d2432); border-color: #ea5c7a; }
+    .btn.warn { background: linear-gradient(180deg, #7c6022, #5e4718); border-color: #f0b24a; }
+    .status-chip,.stat { border: 1px solid #3a57b6; background: rgba(8,18,48,.75); border-radius: 8px; padding: 5px 8px; font-size: 12px; color: #dceaff; display: inline-flex; align-items: center; gap: 7px; min-height: 30px; }
+    .live-strip { border: 1px solid #3c74b4; border-radius: 10px; background: linear-gradient(90deg, rgba(11,41,81,.8), rgba(16,62,115,.9)); padding: 8px 10px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .live-pill { border: 1px solid #4f86c8; background: rgba(5,29,60,.6); border-radius: 999px; padding: 5px 10px; font-size: 12px; color: #e3f0ff; }
+    .live-pill b { color: #9fe3ff; }
+    .scan-progress { position: relative; height: 8px; border-radius: 999px; background: rgba(10,35,66,.8); border: 1px solid #3869a4; overflow: hidden; min-width: 240px; flex: 1; }
+    .scan-progress > i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent2), var(--accent3)); transition: width .25s linear; }
+    .status-chip .dot { width: 9px; height: 9px; border-radius: 999px; background: #9db4d7; }
+    .status-chip.ok .dot { background: #3dc57d; } .status-chip.error .dot { background: #f17777; } .status-chip.scanning .dot { background: #67c4ff; }
+    .chip { border: 1px solid #4666c8; border-radius: 999px; background: rgba(11,23,57,.86); color: #dceeff; font-size: 12px; font-weight: 700; padding: 4px 10px; cursor: pointer; }
+    .chip.active { background: linear-gradient(90deg, rgba(57,213,255,.24), rgba(123,255,191,.24)); border-color: #74e6ff; color: #fff; }
+    .chip.new.active { background: linear-gradient(90deg, rgba(55,199,129,.34), rgba(123,255,191,.28)); border-color: #7dffc7; } .chip.old.active { background: linear-gradient(90deg, rgba(214,164,67,.34), rgba(255,198,109,.26)); border-color: #ffd48b; } .chip.red.active { background: linear-gradient(90deg, rgba(189,80,104,.34), rgba(255,79,216,.24)); border-color: #ff8cdf; }
+    .filters { padding: 10px; display: grid; grid-template-columns: 190px minmax(260px,1fr) 220px 110px auto; gap: 8px; align-items: end; }
+    .field { display: grid; gap: 4px; font-size: 12px; color: #d2e4ff; }
+    .field select,.field input,.settings input { width: 100%; border: 1px solid #3f5fb8; border-radius: 8px; background: #091636; color: #e6f1ff; padding: 7px 8px; font-size: 13px; }
+    .field input::placeholder,.settings input::placeholder { color: #8eb0de; }
+    .meta { text-align: right; color: #d7e9ff; font-size: 12px; padding-bottom: 6px; }
+    .main { display: grid; grid-template-columns: minmax(720px,2.4fr) minmax(320px,1fr) minmax(280px,.95fr); gap: 10px; align-items: start; }
+    .jobs,.details,.settings { min-height: 640px; padding: 10px; position: relative; overflow: hidden; }
+    .jobs { display: grid; grid-template-rows: auto minmax(0,1fr); gap: 8px; z-index: 1; }
+    .tabs { display: flex; gap: 6px; }
+    .tab { border: 1px solid #426fa9; border-radius: 5px; background: #0c2a52; color: #cfe3ff; font-size: 12px; font-weight: 700; padding: 6px 12px; cursor: pointer; }
+    .tab.active { background: #1b4f90; border-color: #6ea2e1; color: #fff; }
+    .table-wrap { border: 1px solid #2f4ea6; border-radius: 10px; overflow: auto; max-height: calc(100vh - 285px); background: linear-gradient(180deg, #f4f8ff, #eef4ff); position: relative; z-index: 1; }
+    table { width: 100%; border-collapse: collapse; color: var(--td); font-size: 12px; }
+    thead th { position: sticky; top: 0; z-index: 1; background: linear-gradient(180deg, var(--th), #111f4e); color: #dff0ff; border-right: 1px solid var(--thline); padding: 8px 7px; text-align: left; font-size: 11px; white-space: nowrap; letter-spacing: .2px; }
+    tbody td { border-top: 1px solid #b7d0ea; padding: 6px 7px; vertical-align: top; line-height: 1.35; }
+    tbody tr { cursor: pointer; transition: filter .14s ease, box-shadow .14s ease; } tbody tr:hover { filter: brightness(.985); } tbody tr.sel { box-shadow: inset 0 0 0 2px #2f65ad, inset 0 0 24px rgba(57,213,255,.08); }
+    tbody tr.row-new td { background: var(--new); } tbody tr.row-old td { background: var(--old); } tbody tr.row-red td { background: var(--red); }
+    .title-cell a { color: #123a6f; font-weight: 700; text-decoration: none; } .title-cell a:hover { text-decoration: underline; }
+    .sub { margin-top: 4px; font-size: 11px; color: #2f4f74; } .clip { max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .empty { padding: 14px; font-size: 13px; color: #1f4475; background: #dcecff; border-radius: 8px; border: 1px dashed #6d97cf; }
+    .details,.settings { display: grid; gap: 9px; align-content: start; z-index: 2; }
+    #details_empty { position: relative; z-index: 3; }
+    .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .head h2,.settings h2 { margin: 0; font-size: 15px; }
+    .mini { border: 1px solid #4d79af; background: #153a6a; color: #d8e9ff; border-radius: 6px; padding: 5px 9px; font-size: 12px; cursor: pointer; }
+    .sev { display: inline-flex; align-items: center; border-radius: 999px; border: 1px solid #4f7eb8; padding: 2px 9px; font-size: 12px; font-weight: 700; width: fit-content; background: #0d2a52; color: #cfe4ff; }
+    .sev.new { background: #164f34; border-color: #3ea673; color: #c8f0d9; } .sev.old { background: #634c17; border-color: #b48f44; color: #f2e5c3; } .sev.red { background: #642525; border-color: #b76565; color: #ffdcdc; }
+    #d_title { margin: 0; font-size: 15px; line-height: 1.35; }
+    .d-link { color: #9bc7ff; text-decoration: none; font-size: 12px; word-break: break-all; }
+    .d-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+    .kv { border: 1px solid #335f99; background: rgba(6,25,52,.45); border-radius: 8px; padding: 7px; display: grid; gap: 2px; }
+    .kv .k { font-size: 11px; color: #acc9ed; text-transform: uppercase; } .kv .v { font-size: 12px; color: #edf4ff; word-break: break-word; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .ai-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    #d_desc { border: 1px solid #335f99; background: rgba(7,28,58,.5); border-radius: 8px; padding: 9px; min-height: 120px; max-height: 320px; overflow: auto; font-size: 12px; color: #e4efff; white-space: pre-wrap; line-height: 1.45; }
+    #d_ai_output { border: 1px solid #335f99; background: rgba(5,24,49,.7); border-radius: 8px; padding: 9px; min-height: 110px; max-height: 280px; overflow: auto; font-size: 12px; color: #d8e9ff; white-space: pre-wrap; line-height: 1.45; }
+    .settings label { display: grid; gap: 4px; font-size: 12px; color: #cfe1ff; }
+    .stack { display: grid; gap: 7px; }
+    .hint { color: #b7d1f4; font-size: 11px; line-height: 1.4; }
+    .error { color: #ffd5d5; font-size: 12px; min-height: 16px; } .sep { height: 1px; background: #325f98; margin: 2px 0; }
+    .tg { font-size: 12px; color: #b7d1f4; min-height: 18px; line-height: 1.4; }
+    .logs { border: 1px solid #3256b3; border-radius: 10px; background: linear-gradient(180deg, #08193d, #07142f); color: #e2efff; max-height: calc(100vh - 315px); overflow: auto; padding: 8px; font-family: Consolas,"Courier New",monospace; font-size: 12px; line-height: 1.35; }
+    .log { padding: 4px 6px; border-bottom: 1px solid rgba(120,162,214,.22); word-break: break-word; } .log:last-child { border-bottom: 0; } .log.warn { color: #ffdca3; } .log.error { color: #ffc3c3; }
+    .toast { position: fixed; right: 14px; bottom: 14px; background: #0e3668; border: 1px solid #4177b9; color: #e9f3ff; border-radius: 8px; padding: 8px 12px; font-size: 12px; opacity: 0; transform: translateY(8px); transition: .18s; pointer-events: none; z-index: 90; }
+    .toast.show { opacity: 1; transform: translateY(0); } .toast.err { background: #5a2525; border-color: #b35c5c; }
+    mark.hl { background: #ffe17a; color: #1d2e4a; border-radius: 3px; padding: 0 2px; }
+    .status-chip.scanning { box-shadow: 0 0 0 0 rgba(103,196,255,.5); animation: pulse 1.2s infinite; }
+    @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(103,196,255,.45); } 70% { box-shadow: 0 0 0 10px rgba(103,196,255,0); } 100% { box-shadow: 0 0 0 0 rgba(103,196,255,0); } }
+    @media (max-width: 1600px) {
+      .main { grid-template-columns: minmax(0,1.7fr) minmax(0,1fr); }
+      .settings { grid-column: 1 / -1; min-height: auto; }
+      h1 { font-size: 32px; }
+    }
+    @media (max-width: 1320px) { .main { grid-template-columns: 1fr; } .jobs,.details,.settings { min-height: auto; } .table-wrap,.logs { max-height: 520px; } }
+    @media (max-width: 860px) { .filters { grid-template-columns: 1fr; } .meta { text-align: left; padding-bottom: 0; } .d-grid { grid-template-columns: 1fr; } .btn { width: 100%; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <button id="btn_export" class="text-link" type="button">Export CSV</button>
+    <header class="panel header">
+      <div class="title"><h1>RADZ OLJ SCRAPER</h1><span class="subtitle">Real-time OnlineJobs.ph Monitoring Console</span></div>
+      <div class="live-strip">
+        <span class="live-pill">Local Time: <b id="live_clock">--:--:--</b></span>
+        <span class="live-pill">Scan Elapsed: <b id="scan_elapsed">0s</b></span>
+        <span class="live-pill">Refresh: <b id="ui_refresh">1s live status</b></span>
+        <div class="scan-progress"><i id="scan_progress_bar"></i></div>
+      </div>
+      <div class="controls">
+        <button id="btn_start" class="btn start" type="button">Start</button>
+        <button id="btn_stop" class="btn stop" type="button">Stop</button>
+        <button id="btn_scan_now" class="btn" type="button">Scan Now</button>
+        <button id="btn_pause_resume" class="btn warn" type="button">Pause Auto-Scan</button>
+        <button id="btn_backup" class="btn" type="button">Backup</button>
+        <button id="btn_restore" class="btn" type="button">Restore Latest</button>
+        <button id="btn_reload" class="btn" type="button">Reload DB</button>
+        <button id="btn_delete_selected" class="btn" type="button">Delete Selected</button>
+        <button id="btn_delete_date" class="btn" type="button">Delete Current Date</button>
+      </div>
+      <div class="status">
+        <span id="status_chip" class="status-chip idle"><span class="dot"></span><b id="status_text">Idle</b></span>
+        <span class="stat">Next scan: <b id="st_next_scan">-</b></span>
+        <span class="stat">Last scan: <b id="st_last_scan">-</b></span>
+        <span class="stat">Scan every: <b id="st_interval">20s</b></span>
+        <span class="stat">Total: <b id="sum_total">0</b></span>
+        <span class="stat">Green: <b id="sum_new">0</b></span>
+        <span class="stat">Yellow: <b id="sum_old">0</b></span>
+        <span class="stat">Red: <b id="sum_red">0</b></span>
+        <span class="stat">Seen: <b id="sum_seen">0</b></span>
+        <span class="stat">Created: <b id="sum_created">0</b></span>
+        <span class="stat">Notif Sent: <b id="sum_notif_sent">0</b></span>
+        <span class="stat">Scan Fail: <b id="sum_scan_fail">0</b></span>
+        <span class="stat">Watcher: <b id="sum_watcher">-</b></span>
+      </div>
+      <div class="ages">
+        <span style="font-size:12px;color:#d6e8ff;">Age Colors:</span>
+        <button class="chip active" data-filter="all" type="button">All</button>
+        <button class="chip new" data-filter="new" type="button">&lt;1h GREEN (NEW)</button>
+        <button class="chip old" data-filter="old" type="button">1-3h YELLOW (SEMI-OLD)</button>
+        <button class="chip red" data-filter="red" type="button">&gt;=3h RED (OLD)</button>
+      </div>
+    </header>
+
+    <section class="panel filters">
+      <label class="field">Date<select id="date_filter"><option value="all">All Dates</option></select></label>
+      <label class="field">Search<input id="jobs_filter" type="text" placeholder="Search title, date, snippet, skills, link..." /></label>
+      <label class="field">Sort<select id="sort_filter"><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="severity">Severity (Red first)</option></select></label>
+      <button id="btn_clear_filters" class="btn" type="button">Clear</button>
+      <div id="rows_meta" class="meta">Showing 0 / 0</div>
+    </section>
+
+    <main class="main">
+      <section class="panel jobs">
+        <div class="tabs"><button class="tab active" data-tab="jobs" type="button">Jobs</button><button class="tab" data-tab="logs" type="button">Live Log</button></div>
+        <div id="jobs_view">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th style="width:34px;"><input id="check_all" type="checkbox" /></th><th style="width:132px;">Posted Time</th><th style="min-width:300px;">Title</th><th style="width:115px;">Type of Work</th><th style="width:126px;">Wage / Salary</th><th style="width:96px;">Hours / Week</th><th style="width:110px;">Date Updated</th><th style="min-width:180px;">Snippet / Description</th></tr></thead>
+              <tbody id="jobs_rows"></tbody>
+            </table>
+            <div id="jobs_empty" class="empty" style="display:none;">No jobs matched your current filter.</div>
+          </div>
+        </div>
+        <div id="logs_view" style="display:none;"><div id="logs_box" class="logs"></div></div>
+      </section>
+      <section class="panel details">
+        <div class="head"><h2>Details</h2><button id="btn_close_details" class="mini" type="button">Clear</button></div>
+        <div id="details_empty" class="empty">Click a job row to see full details.</div>
+        <div id="details_content" style="display:none;gap:9px;">
+          <div id="d_sev" class="sev">Unknown</div>
+          <h3 id="d_title"></h3>
+          <a id="d_link" class="d-link" href="#" target="_blank" rel="noreferrer">-</a>
+          <div class="actions">
+            <button id="d_open" class="btn" type="button">Open Link</button><button id="d_copy" class="btn" type="button">Copy Link</button>
+            <button id="d_brief" class="btn" type="button">Job Brief</button><button id="d_proposal" class="btn" type="button">Proposal</button>
+            <button id="d_followup" class="btn" type="button">Follow-up</button><button id="d_interview" class="btn" type="button">Interview Prep</button>
+            <button id="d_bid" class="btn" type="button">Bid Suggestion</button><button id="d_skill_gap" class="btn" type="button">Skill Gap</button>
+            <button id="d_variants" class="btn" type="button">Proposal Variants</button><button id="d_voice" class="btn" type="button">Voice Script</button>
+            <button id="d_apply_pack" class="btn" type="button">One-Click Apply Pack</button>
+            <button id="d_feedback_good" class="btn" type="button">Mark Good</button><button id="d_feedback_bad" class="btn" type="button">Mark Bad</button>
+            <button id="d_status_applied" class="btn" type="button">Mark Applied</button><button id="d_status_win" class="btn" type="button">Mark Win</button><button id="d_status_lost" class="btn" type="button">Mark Lost</button>
+          </div>
+          <div class="d-grid">
+            <div class="kv"><div class="k">Posted Time</div><div id="d_posted" class="v">-</div></div>
+            <div class="kv"><div class="k">Detected Time</div><div id="d_detected" class="v">-</div></div>
+            <div class="kv"><div class="k">Type of Work</div><div id="d_type" class="v">-</div></div>
+            <div class="kv"><div class="k">Wage / Salary</div><div id="d_wage" class="v">-</div></div>
+            <div class="kv"><div class="k">Hours / Week</div><div id="d_hours" class="v">-</div></div>
+            <div class="kv"><div class="k">Date Updated</div><div id="d_date_updated" class="v">-</div></div>
+            <div class="kv"><div class="k">Site</div><div id="d_site" class="v">-</div></div>
+            <div class="kv"><div class="k">Job ID</div><div id="d_job_id" class="v">-</div></div>
+          </div>
+          <div id="d_desc"></div>
+          <div class="ai-actions">
+            <button id="d_quick_proposal_copy" class="btn" type="button">Quick Proposal + Copy</button>
+            <button id="d_quick_followup_copy" class="btn" type="button">Quick Follow-up + Copy</button>
+            <button id="d_copy_ai_output" class="btn" type="button">Copy AI Output</button>
+          </div>
+          <div id="d_ai_output">AI output will appear here.</div>
+        </div>
+      </section>
+
+      <aside class="panel settings">
+        <h2>Settings</h2>
+        <label>Poll interval (sec)<input id="scan_interval" type="number" min="20" step="1" value="20" /></label>
+        <label><input id="auto_followup_enabled" type="checkbox" /> Enable auto follow-up automation</label>
+        <button id="btn_apply_settings" class="btn" type="button">Apply Settings</button>
+        <div class="hint">Scan interval is fixed by backend at 20 seconds.</div>
+        <div id="last_error" class="error"></div>
+        <div class="sep"></div>
+        <label>Ringtone file<input type="text" value="jobsph/notify.wav" readonly /></label>
+        <label>Ringtone volume<input type="text" value="100%" readonly /></label>
+        <div class="sep"></div>
+        <label><input id="tg_enabled" type="checkbox" /> Enable Telegram mobile alerts</label>
+        <label>Telegram bot token<input id="tg_token" type="text" placeholder="Bot token" /></label>
+        <label>Telegram chat ID<input id="tg_chat_id" type="text" placeholder="Chat ID" /></label>
+        <label>Keyword filter<input id="tg_trigger_words" type="text" placeholder="comma,separated,keywords" /></label>
+        <div class="stack"><button id="tg_save" class="btn" type="button">Save Telegram</button><button id="tg_test" class="btn" type="button">Test Mobile Alert</button></div>
+        <div id="tg_status" class="tg"></div>
+      </aside>
+    </main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script>
+    const REFRESH_MS = __REFRESH_MS__;
+    let allJobs = [], allLogs = [], selectedJob = null, selectedKeys = new Set();
+    let activeFilter = "all", autoPaused = false, nextScanSeconds = null, settingsLoaded = false, lastErrorShown = "";
+    let lastStatusSnapshot = null;
+    const byId = (id) => document.getElementById(id);
+    const esc = (v) => (v || "").toString().replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
+    const escRe = (s) => (s || "").toString().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const txt = (v, f = "N/A") => ((v || "").toString().trim() || f);
+    const cut = (v, n = 180) => { const s = (v || "").toString().trim(); return !s ? "" : (s.length <= n ? s : s.slice(0, n - 3) + "..."); };
+    function highlightText(value, query) {
+      const source = (value || "").toString();
+      const q = (query || "").toString().trim();
+      if (!q) return esc(source);
+      const terms = [...new Set(q.split(/[\s,]+/).map((t) => t.trim()).filter((t) => t.length >= 2))];
+      if (!terms.length) return esc(source);
+      const re = new RegExp("(" + terms.map(escRe).join("|") + ")", "ig");
+      const exactRe = new RegExp("^(" + terms.map(escRe).join("|") + ")$", "i");
+      return source.split(re).map((part) => {
+        if (!part) return "";
+        return exactRe.test(part) ? "<mark class=\"hl\">" + esc(part) + "</mark>" : esc(part);
+      }).join("");
+    }
+    function safeUrl(u) { try { const p = new URL(u); if (p.protocol === "http:" || p.protocol === "https:") return p.toString(); } catch (_) {} return "#"; }
+    async function openExternalUrl(rawUrl) {
+      const url = safeUrl(rawUrl || "");
+      if (url === "#") { toast("Invalid job link.", true); return false; }
+      try {
+        const r = await postJson("/api/open-url", { url });
+        if (r && r.ok) return true;
+      } catch (_) {}
+      try {
+        const win = window.open(url, "_blank", "noopener,noreferrer");
+        if (!win) window.location.href = url;
+        return true;
+      } catch (_) {
+        try { window.location.href = url; return true; } catch (_) {}
+      }
+      toast("Unable to open link.", true);
+      return false;
+    }
+    function sev(bucket) { if (bucket === "green") return "new"; if (bucket === "yellow") return "old"; if (bucket === "red") return "red"; return "unknown"; }
+    function sevLabel(job) { const s = sev(job.age_bucket || "unknown"); if (s === "new") return "New"; if (s === "old") return "Semi-old"; if (s === "red") return "Old"; return "Unknown"; }
+    function toast(m, err = false) { const t = byId("toast"); t.textContent = m || ""; t.className = err ? "toast show err" : "toast show"; clearTimeout(window.__toastTimer); window.__toastTimer = setTimeout(() => t.className = err ? "toast err" : "toast", 2400); }
+    function tgStatus(m, err = false) { const el = byId("tg_status"); el.textContent = m || ""; el.style.color = err ? "#ffd1d1" : "#b7d1f4"; }
+    async function postJson(url, body = {}) { const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); let p = {}; try { p = await r.json(); } catch (_) {} if (!r.ok || p.ok === false) throw new Error(p.error || p.message || ("Request failed: " + r.status)); return p; }
+    async function copyText(v) { const t = (v || "").toString(); if (!t) return toast("Nothing to copy.", true), false; try { await navigator.clipboard.writeText(t); toast("Copied."); return true; } catch (_) { const ta = document.createElement("textarea"); ta.value = t; ta.style.position = "fixed"; ta.style.left = "-9999px"; document.body.appendChild(ta); ta.focus(); ta.select(); let ok = false; try { ok = document.execCommand("copy"); } catch (_) {} document.body.removeChild(ta); if (ok) { toast("Copied."); return true; } toast("Copy failed.", true); return false; } }
+    function renderCountdown() { if (autoPaused) return byId("st_next_scan").textContent = "Paused"; if (nextScanSeconds == null || Number.isNaN(Number(nextScanSeconds))) return byId("st_next_scan").textContent = "-"; byId("st_next_scan").textContent = Math.max(0, Number(nextScanSeconds)) + "s"; }
+    function renderLiveClock() {
+      const now = new Date();
+      byId("live_clock").textContent = now.toLocaleTimeString();
+      if (!lastStatusSnapshot) return;
+      const scanStart = lastStatusSnapshot.last_scan_started_at ? Date.parse(lastStatusSnapshot.last_scan_started_at) : NaN;
+      const inProgress = !!lastStatusSnapshot.scan_in_progress;
+      if (inProgress && Number.isFinite(scanStart)) {
+        const elapsed = Math.max(0, Math.floor((Date.now() - scanStart) / 1000));
+        byId("scan_elapsed").textContent = elapsed + "s";
+      } else {
+        byId("scan_elapsed").textContent = "idle";
+      }
+      const interval = Number(lastStatusSnapshot.check_interval_seconds || 20);
+      const remaining = Number(lastStatusSnapshot.next_scan_in_seconds ?? interval);
+      const pct = autoPaused ? 0 : Math.max(0, Math.min(100, ((interval - remaining) / interval) * 100));
+      byId("scan_progress_bar").style.width = pct + "%";
+    }
+    function renderStatus(s) {
+      lastStatusSnapshot = s || {};
+      const st = (s.scan_status || "Idle").toString().toLowerCase();
+      const m = st === "scanning" ? "scanning" : st === "ok" ? "ok" : st === "error" ? "error" : "idle";
+      byId("status_chip").className = "status-chip " + m; byId("status_text").textContent = s.scan_status || "Idle";
+      autoPaused = !!s.auto_scan_paused; nextScanSeconds = autoPaused ? null : (s.next_scan_in_seconds ?? null);
+      byId("st_last_scan").textContent = s.last_check_local || "-"; byId("st_interval").textContent = (s.check_interval_seconds || 20) + "s";
+      byId("sum_total").textContent = (s.events_count || 0).toLocaleString(); byId("sum_new").textContent = (s.severity_new_count || 0).toLocaleString(); byId("sum_old").textContent = (s.severity_old_count || 0).toLocaleString(); byId("sum_red").textContent = (s.severity_really_old_count || 0).toLocaleString(); byId("sum_seen").textContent = (s.seen_count || 0).toLocaleString(); byId("sum_watcher").textContent = s.watcher_running ? "Running" : "Stopped";
+      const mtr = s.metrics || {};
+      byId("sum_created").textContent = (mtr.events_created || 0).toLocaleString();
+      byId("sum_notif_sent").textContent = (mtr.notifications_sent || 0).toLocaleString();
+      byId("sum_scan_fail").textContent = (mtr.scan_cycles_failed || 0).toLocaleString();
+      byId("btn_pause_resume").textContent = autoPaused ? "Resume Auto-Scan" : "Pause Auto-Scan"; renderCountdown();
+      if (document.activeElement !== byId("scan_interval")) byId("scan_interval").value = String(s.check_interval_seconds || 20);
+      byId("auto_followup_enabled").checked = !!s.auto_followup_enabled;
+      byId("last_error").textContent = s.last_error ? ("Last error: " + s.last_error) : "";
+      if (s.last_error && s.last_error !== lastErrorShown) toast("Last error: " + s.last_error, true); lastErrorShown = s.last_error || "";
+      renderLiveClock();
+    }
+    function renderDateFilter(jobs) { const sel = byId("date_filter"), prev = sel.value || "all"; const dates = [...new Set(jobs.map(j => (j.event_date || "").trim()).filter(Boolean))].filter(d => d !== "Unknown").sort((a, b) => b.localeCompare(a)); sel.innerHTML = '<option value="all">All Dates</option>'; for (const d of dates) { const o = document.createElement("option"); o.value = d; o.textContent = d; sel.appendChild(o); } if ([...sel.options].some(o => o.value === prev)) sel.value = prev; }
+    function filteredJobs() {
+      const q = (byId("jobs_filter").value || "").trim().toLowerCase(), d = byId("date_filter").value || "all", sort = byId("sort_filter").value || "newest";
+      let items = allJobs.filter((j) => { const s = sev(j.age_bucket || "unknown"); if (activeFilter !== "all" && s !== activeFilter) return false; if (d !== "all" && (j.event_date || "") !== d) return false; if (!q) return true; return [j.title,j.description,j.skills,j.type_of_work,j.wage_salary,j.hours_per_week,j.date_updated,j.posted_at,j.detected_at_local,j.site,j.url,j.job_id].join(" ").toLowerCase().includes(q); });
+      const ts = (j) => Number(j.posted_ts || 0) || (Date.parse(j.last_seen_at || j.detected_at || "") || 0);
+      if (sort === "oldest") items.sort((a, b) => ts(a) - ts(b));
+      else if (sort === "severity") { const w = (j) => { const s = sev(j.age_bucket || "unknown"); return s === "red" ? 3 : s === "old" ? 2 : s === "new" ? 1 : 0; }; items.sort((a, b) => (w(b) - w(a)) || (ts(b) - ts(a))); }
+      else items.sort((a, b) => ts(b) - ts(a));
+      return items;
+    }
+    function renderJobs() {
+      const rowsEl = byId("jobs_rows"), emptyEl = byId("jobs_empty"), rows = filteredJobs(); rowsEl.innerHTML = "";
+      const q = (byId("jobs_filter").value || "").trim();
+      byId("rows_meta").textContent = "Showing " + rows.length.toLocaleString() + " / " + allJobs.length.toLocaleString();
+      byId("check_all").checked = rows.length > 0 && rows.every((j) => selectedKeys.has(j.event_key));
+      if (!rows.length) return emptyEl.style.display = "block"; emptyEl.style.display = "none";
+      for (const j of rows) {
+        const tr = document.createElement("tr"), s = sev(j.age_bucket || "unknown"), checked = selectedKeys.has(j.event_key) ? "checked" : "";
+        tr.className = (s === "new" ? "row-new" : s === "old" ? "row-old" : s === "red" ? "row-red" : "") + ((selectedJob && selectedJob.event_key === j.event_key) ? " sel" : ""); tr.dataset.key = j.event_key || "";
+        tr.innerHTML = `<td><input class="row-check" data-key="${esc(j.event_key)}" type="checkbox" ${checked} /></td><td>${highlightText(txt(j.posted_display || j.posted_at,"-"), q)}</td><td class="title-cell"><a href="${esc(safeUrl(j.url || ""))}" target="_blank" rel="noreferrer">${highlightText(txt(j.title,"Untitled"), q)}</a><div class="sub">${esc(sevLabel(j))} | Seen: ${highlightText(txt(j.last_seen_at_local || j.detected_at_local,"-"), q)}</div></td><td>${highlightText(txt(j.type_of_work,"Any"), q)}</td><td>${highlightText(txt(j.wage_salary,"Not specified"), q)}</td><td>${highlightText(txt(j.hours_per_week,"TBD"), q)}</td><td>${highlightText(txt(j.date_updated,"-"), q)}</td><td class="clip">${highlightText(cut(txt(j.description,""),180) || "-", q)}</td>`;
+        rowsEl.appendChild(tr);
+      }
+      for (const cb of rowsEl.querySelectorAll(".row-check")) cb.addEventListener("change", (ev) => { ev.stopPropagation(); const k = cb.getAttribute("data-key") || ""; if (!k) return; cb.checked ? selectedKeys.add(k) : selectedKeys.delete(k); const rows = filteredJobs(); byId("check_all").checked = rows.length > 0 && rows.every((j) => selectedKeys.has(j.event_key)); });
+      for (const tr of rowsEl.querySelectorAll("tr")) tr.addEventListener("click", (ev) => { if (ev.target.closest("a") || ev.target.closest("input")) return; const k = tr.dataset.key || ""; selectedJob = allJobs.find((j) => j.event_key === k) || null; renderJobs(); renderDetails(); });
+    }
+    function renderDetails() {
+      const e = byId("details_empty"), c = byId("details_content"); if (!selectedJob) return e.style.display = "block", c.style.display = "none";
+      e.style.display = "none"; c.style.display = "grid"; const s = sev(selectedJob.age_bucket || "unknown"), sevEl = byId("d_sev");
+      sevEl.className = "sev" + (s === "unknown" ? "" : " " + s); sevEl.textContent = sevLabel(selectedJob);
+      byId("d_title").textContent = txt(selectedJob.title, "-"); const link = safeUrl(selectedJob.url || ""), linkEl = byId("d_link"); linkEl.href = link; linkEl.textContent = link === "#" ? "-" : link;
+      byId("d_posted").textContent = txt(selectedJob.posted_display || selectedJob.posted_at, "-"); byId("d_detected").textContent = txt(selectedJob.detected_at_local, "-"); byId("d_type").textContent = txt(selectedJob.type_of_work, "-"); byId("d_wage").textContent = txt(selectedJob.wage_salary, "-"); byId("d_hours").textContent = txt(selectedJob.hours_per_week, "-"); byId("d_date_updated").textContent = txt(selectedJob.date_updated, "-"); byId("d_site").textContent = txt(selectedJob.site, "-"); byId("d_job_id").textContent = txt(selectedJob.job_id, "-"); byId("d_desc").textContent = txt(selectedJob.description, "No description.");
+      byId("d_ai_output").textContent = "AI output will appear here.";
+      const q = (byId("jobs_filter").value || "").trim();
+      if (q) {
+        byId("d_desc").innerHTML = highlightText(txt(selectedJob.description, "No description."), q);
+      }
+    }
+    function renderLogs() { const b = byId("logs_box"); b.innerHTML = ""; if (!allLogs.length) return b.innerHTML = '<div class="log">No logs yet.</div>'; for (const r of allLogs) { const d = document.createElement("div"); d.className = "log " + ((r.level || "info").toString().toLowerCase()); d.textContent = "[" + txt(r.ts_local, "-") + "] " + txt(r.message, ""); b.appendChild(d); } if (b.scrollHeight > b.clientHeight) b.scrollTop = b.scrollHeight; }
+    function switchTab(tab) { const t = tab === "logs" ? "logs" : "jobs"; byId("jobs_view").style.display = t === "jobs" ? "block" : "none"; byId("logs_view").style.display = t === "logs" ? "block" : "none"; for (const b of document.querySelectorAll(".tab")) b.classList.toggle("active", b.getAttribute("data-tab") === t); }
+    async function loadTelegramSettings() { try { const r = await fetch("/api/settings/telegram"); const p = await r.json(); if (!r.ok || !p.ok) throw new Error(p.error || "Failed to load settings"); const s = p.settings || {}; byId("tg_token").value = s.bot_token || ""; byId("tg_chat_id").value = s.chat_id || ""; byId("tg_trigger_words").value = s.trigger_words_csv || ""; byId("tg_enabled").checked = !!s.enabled; tgStatus("Telegram settings loaded."); } catch (e) { tgStatus("Settings load error: " + (e.message || e), true); } }
+    async function saveTelegramSettings() { const body = { bot_token: (byId("tg_token").value || "").trim(), chat_id: (byId("tg_chat_id").value || "").trim(), trigger_words: (byId("tg_trigger_words").value || "").trim(), enabled: !!byId("tg_enabled").checked }; try { await postJson("/api/settings/telegram", body); tgStatus("Telegram settings saved."); toast("Telegram settings saved."); } catch (e) { tgStatus("Save failed: " + (e.message || e), true); toast("Telegram save failed.", true); } }
+    async function sendTelegramTest() { try { await postJson("/api/settings/telegram/test"); tgStatus("Test notification sent."); toast("Telegram test sent."); } catch (e) { tgStatus("Test failed: " + (e.message || e), true); toast("Telegram test failed.", true); } }
+    async function startWatcher() { try { const p = await postJson("/api/control/start"); toast(p.message || "Watcher started."); await refreshAll(); } catch (e) { toast("Start failed: " + (e.message || e), true); } }
+    async function stopWatcher() { try { const p = await postJson("/api/control/stop"); toast(p.message || "Stop requested."); await refreshAll(); } catch (e) { toast("Stop failed: " + (e.message || e), true); } }
+    async function scanNow() { try { const p = await postJson("/api/control/scan-now"); toast(p.message || "Scan requested."); await refreshAll(); } catch (e) { toast("Scan now failed: " + (e.message || e), true); } }
+    async function pauseResume() { try { const p = await postJson(autoPaused ? "/api/control/resume" : "/api/control/pause"); toast(p.message || (autoPaused ? "Resumed." : "Paused.")); await refreshAll(); } catch (e) { toast("Pause/resume failed: " + (e.message || e), true); } }
+    async function reloadDb() { try { const p = await postJson("/api/control/reload"); selectedKeys.clear(); byId("check_all").checked = false; toast(p.message || "Reloaded DB."); await refreshAll(); } catch (e) { toast("Reload failed: " + (e.message || e), true); } }
+    function exportCsv() { window.open("/api/jobs/export.csv", "_blank"); toast("Export started."); }
+    async function deleteSelected() { if (!selectedKeys.size) return toast("Select jobs first.", true); try { const p = await postJson("/api/jobs/delete", { event_keys: [...selectedKeys] }); selectedKeys.clear(); byId("check_all").checked = false; toast((p.deleted || 0) + " selected job(s) deleted."); await refreshAll(); } catch (e) { toast("Delete selected failed: " + (e.message || e), true); } }
+    async function deleteCurrentDate() { const date = byId("date_filter").value || "all"; if (date === "all") return toast("Pick a specific date first.", true); try { const p = await postJson("/api/jobs/delete", { date }); selectedKeys.clear(); byId("check_all").checked = false; toast((p.deleted || 0) + " job(s) deleted for " + date + "."); await refreshAll(); } catch (e) { toast("Delete date failed: " + (e.message || e), true); } }
+    async function applySettings() {
+      const raw = parseInt(byId("scan_interval").value || "20", 10), seconds = Number.isFinite(raw) && raw > 0 ? raw : 20;
+      const autoFollowupEnabled = !!byId("auto_followup_enabled").checked;
+      try {
+        const p = await postJson("/api/control/scan-interval", { seconds });
+        await postJson("/api/control/automation", { enabled: autoFollowupEnabled });
+        toast((p.message || "Settings applied.") + " Automation " + (autoFollowupEnabled ? "enabled" : "disabled") + ".");
+        await refreshAll();
+      } catch (e) { toast("Apply settings failed: " + (e.message || e), true); }
+    }
+    async function backupData() { try { const p = await postJson("/api/control/backup"); toast("Backup done: " + (p.count || 0) + " file(s)."); } catch (e) { toast("Backup failed: " + (e.message || e), true); } }
+    async function restoreLatestData() { try { const p = await postJson("/api/control/restore-latest"); toast("Restore done: " + (p.count || 0) + " file(s)."); await refreshAll(); } catch (e) { toast("Restore failed: " + (e.message || e), true); } }
+    function selectedKey() { return selectedJob && selectedJob.event_key ? selectedJob.event_key : ""; }
+    function requireSelected() { const k = selectedKey(); if (!k) { toast("Select a job first.", true); return ""; } return k; }
+    function setAiOutput(v) { byId("d_ai_output").textContent = (v || "").toString().trim() || "No output."; }
+    async function runDetailApi(path, formatFn) {
+      const key = requireSelected(); if (!key) return;
+      try {
+        const r = await fetch(path.replace("{key}", encodeURIComponent(key)));
+        const p = await r.json();
+        if (!r.ok || p.ok === false) throw new Error(p.error || "Request failed");
+        setAiOutput(formatFn(p));
+      } catch (e) {
+        setAiOutput("Error: " + (e.message || e));
+        toast("Request failed.", true);
+      }
+    }
+    async function runProposal() { await runDetailApi("/api/events/{key}/proposal", (p) => p.proposal || "No proposal."); }
+    async function runBrief() { await runDetailApi("/api/events/{key}/brief", (p) => JSON.stringify(p.brief || {}, null, 2)); }
+    async function runFollowup() { await runDetailApi("/api/events/{key}/followup", (p) => p.followup || "No follow-up."); }
+    async function runInterviewPrep() { await runDetailApi("/api/events/{key}/interview-prep", (p) => JSON.stringify(p.interview_prep || {}, null, 2)); }
+    async function runBidSuggestion() { await runDetailApi("/api/events/{key}/bid-suggestion", (p) => JSON.stringify(p.bid_suggestion || {}, null, 2)); }
+    async function runSkillGap() { await runDetailApi("/api/events/{key}/skill-gap", (p) => JSON.stringify(p.skill_gap || {}, null, 2)); }
+    async function runVariants() { await runDetailApi("/api/events/{key}/proposal-variants", (p) => JSON.stringify(p.variants || {}, null, 2)); }
+    async function runVoiceScript() { await runDetailApi("/api/events/{key}/voice-script", (p) => p.voice_script || "No script."); }
+    async function runApplyPack() { await runDetailApi("/api/events/{key}/apply-pack", (p) => JSON.stringify(p.apply_pack || {}, null, 2)); }
+    async function quickProposalCopy() {
+      const key = requireSelected(); if (!key) return;
+      try {
+        const r = await fetch("/api/events/" + encodeURIComponent(key) + "/proposal");
+        const p = await r.json();
+        if (!r.ok || p.ok === false) throw new Error(p.error || "Request failed");
+        const text = p.proposal || "No proposal.";
+        setAiOutput(text);
+        await copyText(text);
+      } catch (e) { toast("Quick proposal failed: " + (e.message || e), true); }
+    }
+    async function quickFollowupCopy() {
+      const key = requireSelected(); if (!key) return;
+      try {
+        const r = await fetch("/api/events/" + encodeURIComponent(key) + "/followup");
+        const p = await r.json();
+        if (!r.ok || p.ok === false) throw new Error(p.error || "Request failed");
+        const text = p.followup || "No follow-up.";
+        setAiOutput(text);
+        await copyText(text);
+      } catch (e) { toast("Quick follow-up failed: " + (e.message || e), true); }
+    }
+    async function copyAiOutput() { await copyText(byId("d_ai_output").textContent || ""); }
+    async function submitFeedback(label) {
+      const key = requireSelected(); if (!key) return;
+      try { await postJson("/api/events/" + encodeURIComponent(key) + "/feedback", { label }); toast("Feedback saved."); await refreshAll(); } catch (e) { toast("Feedback failed: " + (e.message || e), true); }
+    }
+    async function markStatus(status) {
+      const key = requireSelected(); if (!key) return;
+      let reason = "";
+      if (status === "lost") reason = window.prompt("Loss reason (optional):", "") || "";
+      try { await postJson("/api/events/" + encodeURIComponent(key) + "/status", { status, reason }); toast("Status updated: " + status); await refreshAll(); } catch (e) { toast("Status update failed: " + (e.message || e), true); }
+    }
+    function clearFilters() { activeFilter = "all"; byId("jobs_filter").value = ""; byId("date_filter").value = "all"; byId("sort_filter").value = "newest"; for (const c of document.querySelectorAll(".chip[data-filter]")) c.classList.toggle("active", c.getAttribute("data-filter") === "all"); renderJobs(); toast("Filters cleared."); }
+    function closeDetails() { selectedJob = null; renderJobs(); renderDetails(); }
+    async function refreshAll() {
+      try {
+        const t = Date.now();
+        const [sRes, jRes, lRes] = await Promise.all([fetch("/api/status?t=" + t, { cache: "no-store" }), fetch("/api/jobs?limit=2000&t=" + t, { cache: "no-store" }), fetch("/api/logs?limit=300&t=" + t, { cache: "no-store" })]);
+        if (!sRes.ok || !jRes.ok || !lRes.ok) throw new Error("Unable to refresh dashboard.");
+        const s = await sRes.json(), j = await jRes.json(), l = await lRes.json();
+        renderStatus(s || {}); allJobs = j.jobs || []; allLogs = l.logs || [];
+        const live = new Set(allJobs.map((x) => x.event_key)); selectedKeys = new Set([...selectedKeys].filter((k) => live.has(k)));
+        if (selectedJob && !live.has(selectedJob.event_key)) selectedJob = null; else if (selectedJob) selectedJob = allJobs.find((x) => x.event_key === selectedJob.event_key) || null;
+        renderDateFilter(allJobs); renderJobs(); renderDetails(); renderLogs();
+        if (!settingsLoaded) { await loadTelegramSettings(); settingsLoaded = true; }
+      } catch (e) { toast("Dashboard refresh error: " + (e.message || e), true); }
+    }
+    async function refreshStatusFast() {
+      try {
+        const t = Date.now();
+        const sRes = await fetch("/api/status?t=" + t, { cache: "no-store" });
+        if (!sRes.ok) return;
+        const s = await sRes.json();
+        renderStatus(s || {});
+      } catch (_) {}
+    }
+    byId("btn_start").addEventListener("click", startWatcher); byId("btn_stop").addEventListener("click", stopWatcher); byId("btn_scan_now").addEventListener("click", scanNow); byId("btn_pause_resume").addEventListener("click", pauseResume); byId("btn_export").addEventListener("click", exportCsv); byId("btn_reload").addEventListener("click", reloadDb); byId("btn_delete_selected").addEventListener("click", deleteSelected); byId("btn_delete_date").addEventListener("click", deleteCurrentDate); byId("btn_apply_settings").addEventListener("click", applySettings); byId("btn_clear_filters").addEventListener("click", clearFilters); byId("btn_close_details").addEventListener("click", closeDetails); byId("btn_backup").addEventListener("click", backupData); byId("btn_restore").addEventListener("click", restoreLatestData);
+    byId("jobs_filter").addEventListener("input", renderJobs); byId("date_filter").addEventListener("change", renderJobs); byId("sort_filter").addEventListener("change", renderJobs);
+    byId("check_all").addEventListener("change", (ev) => { const checked = !!ev.target.checked; for (const cb of document.querySelectorAll("#jobs_rows .row-check")) { cb.checked = checked; const k = cb.getAttribute("data-key") || ""; if (!k) continue; checked ? selectedKeys.add(k) : selectedKeys.delete(k); } });
+    for (const c of document.querySelectorAll(".chip[data-filter]")) c.addEventListener("click", () => { activeFilter = c.getAttribute("data-filter") || "all"; for (const x of document.querySelectorAll(".chip[data-filter]")) x.classList.toggle("active", x === c); renderJobs(); });
+    for (const t of document.querySelectorAll(".tab")) t.addEventListener("click", () => switchTab(t.getAttribute("data-tab") || "jobs"));
+    byId("tg_save").addEventListener("click", saveTelegramSettings); byId("tg_test").addEventListener("click", sendTelegramTest);
+    byId("d_open").addEventListener("click", async () => { if (!selectedJob) return toast("No selected job.", true); await openExternalUrl(selectedJob.url || ""); });
+    byId("d_copy").addEventListener("click", async () => { if (!selectedJob) return toast("No selected job.", true); await copyText(selectedJob.url || ""); });
+    byId("jobs_rows").addEventListener("click", async (ev) => {
+      const anchor = ev.target.closest("a");
+      if (!anchor) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      await openExternalUrl(anchor.getAttribute("href") || "");
+    });
+    byId("d_link").addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      if (!selectedJob) return toast("No selected job.", true);
+      await openExternalUrl(selectedJob.url || "");
+    });
+    byId("d_proposal").addEventListener("click", runProposal); byId("d_brief").addEventListener("click", runBrief); byId("d_followup").addEventListener("click", runFollowup); byId("d_interview").addEventListener("click", runInterviewPrep);
+    byId("d_bid").addEventListener("click", runBidSuggestion); byId("d_skill_gap").addEventListener("click", runSkillGap); byId("d_variants").addEventListener("click", runVariants); byId("d_voice").addEventListener("click", runVoiceScript); byId("d_apply_pack").addEventListener("click", runApplyPack);
+    byId("d_feedback_good").addEventListener("click", () => submitFeedback("good")); byId("d_feedback_bad").addEventListener("click", () => submitFeedback("bad"));
+    byId("d_status_applied").addEventListener("click", () => markStatus("applied")); byId("d_status_win").addEventListener("click", () => markStatus("win")); byId("d_status_lost").addEventListener("click", () => markStatus("lost"));
+    byId("d_quick_proposal_copy").addEventListener("click", quickProposalCopy); byId("d_quick_followup_copy").addEventListener("click", quickFollowupCopy); byId("d_copy_ai_output").addEventListener("click", copyAiOutput);
+    if (window.__radzRefreshTimer) clearInterval(window.__radzRefreshTimer); if (window.__radzFastStatusTimer) clearInterval(window.__radzFastStatusTimer); if (window.__radzCountdownTimer) clearInterval(window.__radzCountdownTimer);
+    window.__radzRefreshTimer = setInterval(() => refreshAll(), REFRESH_MS);
+    window.__radzFastStatusTimer = setInterval(() => refreshStatusFast(), 1000);
+    window.__radzCountdownTimer = setInterval(() => { if (!autoPaused && nextScanSeconds !== null && nextScanSeconds > 0) { nextScanSeconds -= 1; renderCountdown(); } renderLiveClock(); }, 1000);
+    switchTab("jobs"); refreshAll();
+  </script>
+</body>
+</html>

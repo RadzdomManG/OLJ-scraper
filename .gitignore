@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.log
+gh.exe
+write_test.tmp
+
+data/*.json
+data/runtime_check/
+!data/.gitkeep
+!data/telegram_settings.example.json

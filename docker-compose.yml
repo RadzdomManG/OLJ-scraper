@@ -4,8 +4,26 @@ services:
     container_name: onlinejobs-watcher
     restart: unless-stopped
     volumes:
-      - ./data:/app/data    # persist seen_jobs.json
+      - ./data:/app/data    # persist seen_jobs.json + job_events.json
+    ports:
+      - "8080:8080"         # live dashboard
     environment:
-      - CHECK_INTERVAL_SECONDS=30   # optional, override config.py
+      - CHECK_INTERVAL_SECONDS=120    # poll frequency (2 minutes)
+      - POSTED_WITHIN_MINUTES=5       # save/notify new jobs posted within last N minutes
+      - DRY_RUN=false                 # true = no telegram sent, log only
+      - SEED_SEEN_ON_STARTUP=false    # true = seed current listings into seen store on startup
+      - SEED_ONLY_IF_EMPTY=true       # seed only when seen store is empty
+      - ONLINEJOBSPH_SEARCH_URL=https://www.onlinejobs.ph/jobseekers/jobsearch
+      - KEYWORDS=ai creator,ai content creator,prompt engineer,comfyui,stable diffusion
+      - TRIGGER_WORDS=ai creator,ai content creator,prompt engineer,comfyui,stable diffusion
+      - TELEGRAM_ENABLED=true
+      - TELEGRAM_BOT_TOKEN=
+      - TELEGRAM_CHAT_ID=
+      - NOTIFY_ONLY_KEYWORD_MATCH=true
+      - ENABLE_STATUS_NOTIFICATIONS=false
+      - ENABLE_UI=true                # dashboard + API on port 8080
+      - UI_HOST=0.0.0.0
+      - UI_PORT=8080
+      - UI_REFRESH_SECONDS=5
     tty: true   # keeps logs interactive
 

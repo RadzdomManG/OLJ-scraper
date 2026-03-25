@@ -12,6 +12,9 @@ COPY . .
 # Make data folder
 RUN mkdir -p data
 
+# Dashboard/API port
+EXPOSE 8080
+
 # Run the watcher
 CMD ["python", "watcher.py"]
 
