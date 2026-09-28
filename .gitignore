@@ -2,6 +2,11 @@
 __pycache__/
 *.pyc
 *.log
+.env
+.env.*
+!.env.example
+frontend/node_modules/
+frontend/.next/
 gh.exe
 write_test.tmp
 

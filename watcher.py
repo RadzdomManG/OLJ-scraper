@@ -16,6 +16,8 @@ from zoneinfo import ZoneInfo
 import requests
 from bs4 import BeautifulSoup
 from flask import Flask, Response, jsonify, request
+from flask_cors import CORS
+import hmac
 
 
 # ======================
@@ -250,6 +252,17 @@ session = requests.Session()
 session.headers.update(HEADERS)
 
 app = Flask(__name__)
+CORS(app, resources={r"/api/*": {"origins": [origin.strip() for origin in os.environ.get("FRONTEND_ORIGIN", "").split(",") if origin.strip()] + ["http://localhost:3000", "http://127.0.0.1:3000"]}})
+
+
+@app.before_request
+def require_api_token():
+    """Require a shared secret when the API is exposed through a public tunnel."""
+    token = os.environ.get("BACKEND_API_TOKEN", "").strip()
+    if request.path.startswith("/api/") and token:
+        supplied = request.headers.get("X-Backend-Token", "")
+        if not hmac.compare_digest(supplied, token):
+            return jsonify({"error": "Unauthorized"}), 401
 
 state_lock = threading.Lock()
 state = {

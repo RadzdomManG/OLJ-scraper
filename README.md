@@ -1,5 +1,55 @@
 # OnlineJobs Watcher Bot
 
+## Aurelius web portal (Vercel)
+
+The `frontend/` directory is a Next.js dashboard. Vercel runs the frontend and its protected API routes; the Flask watcher runs separately. Public code users can access only `/jobs`. Supabase Auth verifies the owner, and Supabase Postgres stores hashed access codes. Owner and code checks run on the server. The frontend never sends the Supabase service role key or backend token to the browser.
+
+### 1. Set up Supabase
+
+Create a Supabase project, run [`supabase/schema.sql`](supabase/schema.sql) in its SQL editor, and create the owner account under Authentication → Users. Disable public signups for an owner-only portal. Set `OWNER_EMAIL` to the exact owner account email. The owner password stays in Supabase Auth; there is no `OWNER_PASSWORD_HASH` when using this method.
+
+Access codes are displayed only when created. Copy them then; the database stores only a keyed hash. Revoking or deleting a code immediately invalidates its viewer sessions. `max_uses` counts successful new code logins, not page refreshes. Existing sessions remain valid after the use limit is reached until the code is revoked or expires.
+
+### 2. Run the Flask backend
+
+Copy [`.env.example`](.env.example) values into your terminal environment or process manager. Set `BACKEND_API_TOKEN` to a long random secret and use the same value on Vercel. This protects all `/api/*` endpoints when exposing the backend. Set `FRONTEND_ORIGIN` to your exact Vercel URL. Localhost port 3000 is also allowed for development. `UI_HOST` defaults to `0.0.0.0`, `UI_PORT` to `8080`, and `GET /healthz` is available for health checks.
+
+```powershell
+git clone https://github.com/RadzdomManG/OLJ-scraper.git
+cd OLJ-scraper
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+$env:BACKEND_API_TOKEN = "your-long-random-secret"
+$env:FRONTEND_ORIGIN = "https://your-project.vercel.app"
+python watcher.py
+```
+
+On macOS/Linux, activate with `source .venv/bin/activate` and use `export` for environment variables. In a second terminal, install [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) and run:
+
+```text
+cloudflared tunnel --url http://localhost:8080
+```
+
+Use the generated `https://xxxxx.trycloudflare.com` URL as `NEXT_PUBLIC_BACKEND_API_URL`. Quick Tunnel URLs change when restarted, so update the Vercel environment variable and redeploy after a URL change. A named tunnel or VPS address is preferable for stable hosting.
+
+### 3. Configure and deploy the frontend
+
+Use [`frontend/.env.example`](frontend/.env.example) as the variable checklist. In Vercel, set the project root directory to `frontend`. Set `NEXT_PUBLIC_BACKEND_API_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OWNER_EMAIL`, `SESSION_SECRET`, and `BACKEND_API_TOKEN`. Keep the service role key, session secret, and backend token server side; never add `NEXT_PUBLIC_` to them. `NEXT_PUBLIC_BACKEND_API_URL` is public by design, but its API requires the server token.
+
+For local development:
+
+```powershell
+cd frontend
+Copy-Item .env.example .env.local
+npm install
+npm run dev
+```
+
+Set real values in `.env.local` before signing in. The app is at `http://localhost:3000`. Run `npm run lint` and `npm run build` before deployment. `.env` files are gitignored.
+
+**Security:** Do not expose the Flask API through a tunnel without `BACKEND_API_TOKEN`. Its original dashboard and control endpoints are powerful. The portal sends the token only from Next.js server routes. The owner's Supabase access cookie expires with the Auth token, after which the owner signs in again.
+
 Simple bot for watching OnlineJobs.ph job posts and sending alerts to Telegram.
 
 ## What This Bot Does
