@@ -109,12 +109,10 @@ if INCLUDE_FREELANCER:
 # Fixed scan cycle per product requirement.
 CHECK_INTERVAL_SECONDS = 20
 HEARTBEAT_INTERVAL = env_int("HEARTBEAT_INTERVAL", 3600)
-POSTED_WITHIN_MINUTES = env_int("POSTED_WITHIN_MINUTES", 60)
-STARTUP_BACKFILL_HOURS = max(1, env_int("STARTUP_BACKFILL_HOURS", 24))
 MAX_RETRIES = env_int("MAX_RETRIES", 2)
 TIMEOUT = env_int("TIMEOUT", 20)
 SITE_FETCH_BUDGET_SECONDS = max(5, env_int("SITE_FETCH_BUDGET_SECONDS", 25))
-MAX_STORED_EVENTS = env_int("MAX_STORED_EVENTS", 2000)
+MAX_STORED_EVENTS = max(1, env_int("MAX_STORED_EVENTS", 5000))
 MAX_DETAIL_FETCH_PER_CYCLE = env_int("MAX_DETAIL_FETCH_PER_CYCLE", 5)
 MAX_LOG_LINES = max(80, env_int("MAX_LOG_LINES", 600))
 
@@ -465,26 +463,15 @@ def event_posted_datetime_utc(event):
     return None
 
 
-def event_within_current_window(event):
-    if str(event.get("site_type", "")).strip() != "onlinejobsph":
-        return True
-    within, _, _ = is_onlinejobs_within_window(event)
-    return bool(within)
-
-
-def prune_events_outside_window(events):
-    pruned = [e for e in (events or []) if event_within_current_window(e)]
-    pruned.sort(
-        key=lambda e: (
-            int((enrich_event_for_ui(e, include_heavy=False).get("posted_ts") or 0)),
-            str(e.get("detected_at", "")),
-        ),
+def retain_newest_events(events):
+    """Keep the 5,000 most recently discovered jobs, regardless of post age."""
+    kept = sorted(
+        events or [],
+        key=lambda event: (str(event.get("detected_at", "")), str(event.get("event_key", ""))),
         reverse=True,
-    )
-    if len(pruned) > MAX_STORED_EVENTS:
-        pruned = pruned[:MAX_STORED_EVENTS]
-    keys = {e.get("event_key", "") for e in pruned if e.get("event_key")}
-    return pruned, keys
+    )[:MAX_STORED_EVENTS]
+    keys = {event.get("event_key", "") for event in kept if event.get("event_key")}
+    return kept, keys
 
 
 def age_bucket_counts(events):
@@ -926,12 +913,7 @@ def load_job_events():
         keys.add(event["event_key"])
         events.append(event)
 
-    events.sort(key=lambda e: e.get("detected_at", ""), reverse=True)
-    if len(events) > MAX_STORED_EVENTS:
-        events = events[:MAX_STORED_EVENTS]
-        keys = {e["event_key"] for e in events}
-
-    return events, keys
+    return retain_newest_events(events)
 
 
 def save_job_events(events):
@@ -1728,14 +1710,11 @@ def format_onlinejobs_posted_display(event):
     return posted_raw
 
 
-def is_onlinejobs_within_window(job):
-    if POSTED_WITHIN_MINUTES <= 0:
-        return True, None, ""
-
+def onlinejobs_posting_info(job):
     posted_text = job.get("posted_at", "")
     posted_dt = parse_onlinejobs_posted_at(posted_text)
     if not posted_dt:
-        return False, None, ""
+        return None, ""
 
     now_dt = datetime.now(ONLINEJOBSPH_TZ)
     age_seconds = (now_dt - posted_dt).total_seconds()
@@ -1744,21 +1723,7 @@ def is_onlinejobs_within_window(job):
     if age_seconds < 0 and abs(age_seconds) <= 120:
         age_seconds = 0
 
-    within = age_seconds <= (POSTED_WITHIN_MINUTES * 60)
-    return within, age_seconds, posted_dt.isoformat()
-
-
-def is_onlinejobs_within_hours(job, hours):
-    posted_text = job.get("posted_at", "")
-    posted_dt = parse_onlinejobs_posted_at(posted_text)
-    if not posted_dt:
-        return False, None, ""
-    now_dt = datetime.now(ONLINEJOBSPH_TZ)
-    age_seconds = (now_dt - posted_dt).total_seconds()
-    if age_seconds < 0 and abs(age_seconds) <= 120:
-        age_seconds = 0
-    within = age_seconds <= (max(1, int(hours)) * 3600)
-    return within, age_seconds, posted_dt.isoformat()
+    return age_seconds, posted_dt.isoformat()
 
 
 # ======================
@@ -1969,12 +1934,11 @@ def seed_seen_from_current_listings(seen):
     return added
 
 
-def startup_backfill_recent_jobs(hours=24):
+def startup_backfill_listed_jobs():
     added_events = 0
     seen_changed = False
     events_changed = False
     detail_fetch_count = 0
-    hours = max(1, int(hours))
 
     for site in JOB_SITES:
         try:
@@ -1987,9 +1951,7 @@ def startup_backfill_recent_jobs(hours=24):
             if site["type"] != "onlinejobsph":
                 continue
 
-            within, age_seconds, posted_at_iso = is_onlinejobs_within_hours(job, hours)
-            if not within:
-                continue
+            age_seconds, posted_at_iso = onlinejobs_posting_info(job)
 
             seen_key = build_seen_key_for_job(site["type"], job_id, job)
             with state_lock:
@@ -2017,8 +1979,7 @@ def startup_backfill_recent_jobs(hours=24):
                 state["event_keys"].add(event["event_key"])
                 state["events"].insert(0, event)
                 if len(state["events"]) > MAX_STORED_EVENTS:
-                    state["events"] = state["events"][:MAX_STORED_EVENTS]
-                    state["event_keys"] = {e["event_key"] for e in state["events"]}
+                    state["events"], state["event_keys"] = retain_newest_events(state["events"])
                 recent_fps = state.setdefault("recent_fingerprints", {})
                 recent_fps[fp] = event.get("detected_at", now_utc_iso())
                 added_events += 1
@@ -2148,7 +2109,6 @@ def run_check_cycle():
         "checked_at": cycle_started,
         "sites": [],
         "new_events": 0,
-        "skipped_outside_window": 0,
         "niche_matched_events": 0,
         "notifications_sent": 0,
         "notifications_skipped": 0,
@@ -2168,7 +2128,6 @@ def run_check_cycle():
             "site": site["name"],
             "fetched": 0,
             "new_events": 0,
-            "skipped_outside_window": 0,
             "niche_matched_events": 0,
             "notifications_sent": 0,
             "notifications_skipped": 0,
@@ -2206,16 +2165,11 @@ def run_check_cycle():
                     state["seen"].add(seen_key)
                     seen_changed = True
 
-            should_store = True
             age_seconds = None
             posted_at_iso = ""
 
             if site["type"] == "onlinejobsph":
-                should_store, age_seconds, posted_at_iso = is_onlinejobs_within_window(job)
-                if not should_store:
-                    site_summary["skipped_outside_window"] += 1
-                    cycle_summary["skipped_outside_window"] += 1
-                    continue
+                age_seconds, posted_at_iso = onlinejobs_posting_info(job)
 
                 if detail_fetch_count < MAX_DETAIL_FETCH_PER_CYCLE:
                     detail = fetch_job_detail_onlinejobsph(job["url"])
@@ -2257,7 +2211,7 @@ def run_check_cycle():
                 now_seen_local = format_local_time(now_seen_iso, DASHBOARD_TZ)
                 if event["event_key"] in state["event_keys"]:
                     if STORE_ALL_FETCHED_JOBS:
-                        for idx, existing in enumerate(state["events"]):
+                        for existing in state["events"]:
                             if existing.get("event_key") != event["event_key"]:
                                 continue
                             existing["title"] = event.get("title", existing.get("title", ""))
@@ -2279,9 +2233,6 @@ def run_check_cycle():
                             existing["fingerprint"] = fp
                             existing["last_seen_at"] = now_seen_iso
                             existing["last_seen_at_local"] = now_seen_local
-                            # Move recently seen job toward top so the table reflects current listings.
-                            state["events"].pop(idx)
-                            state["events"].insert(0, existing)
                             break
                         events_changed = True
                     continue
@@ -2291,8 +2242,7 @@ def run_check_cycle():
                 event["last_seen_at_local"] = now_seen_local
                 state["events"].insert(0, event)
                 if len(state["events"]) > MAX_STORED_EVENTS:
-                    state["events"] = state["events"][:MAX_STORED_EVENTS]
-                    state["event_keys"] = {e["event_key"] for e in state["events"]}
+                    state["events"], state["event_keys"] = retain_newest_events(state["events"])
 
                 events_changed = True
                 metrics = state.setdefault("metrics", {})
@@ -2363,10 +2313,6 @@ def run_check_cycle():
             "info",
         )
         for event in backfill_candidates:
-            if event.get("site_type") == "onlinejobsph":
-                within, _, _ = is_onlinejobs_within_window(event)
-                if not within:
-                    continue
             site_name = event.get("site", "OnlineJobsPH") or "OnlineJobsPH"
             notification_sent = notify_new_event(event, {"name": site_name, "type": event.get("site_type", "")})
             with state_lock:
@@ -2396,7 +2342,7 @@ def run_check_cycle():
 
     if should_heartbeat and ENABLE_STATUS_NOTIFICATIONS:
         send_telegram(
-            f"Watcher running. New-window filter: {POSTED_WITHIN_MINUTES} minute(s).",
+            f"Watcher running. Retaining the latest {MAX_STORED_EVENTS} discovered jobs.",
             title="Heartbeat - OnlineJobs Watcher",
         )
 
@@ -2514,7 +2460,6 @@ def execute_scan_cycle(trigger_label="auto"):
             state["last_scan_result"] = "ok"
         add_runtime_log(
             f"Cycle complete: new_events={summary['new_events']} "
-            f"skipped_outside_window={summary['skipped_outside_window']} "
             f"duration={round(time.time() - cycle_start_ts, 2)}s",
             "success",
         )
@@ -2674,7 +2619,7 @@ def stop_watcher(join_timeout=0.25):
 def reload_runtime_data():
     loaded_seen = load_seen_jobs()
     loaded_events, loaded_keys = load_job_events()
-    loaded_events, loaded_keys = prune_events_outside_window(loaded_events)
+    loaded_events, loaded_keys = retain_newest_events(loaded_events)
     telegram_settings = load_telegram_settings()
     feedback = load_feedback()
     analytics = load_analytics()
@@ -2716,7 +2661,7 @@ def reload_runtime_data():
 def initialize_state():
     loaded_seen = load_seen_jobs()
     loaded_events, loaded_keys = load_job_events()
-    loaded_events, loaded_keys = prune_events_outside_window(loaded_events)
+    loaded_events, loaded_keys = retain_newest_events(loaded_events)
     telegram_settings = load_telegram_settings()
     feedback = load_feedback()
     analytics = load_analytics()
@@ -2788,7 +2733,7 @@ def initialize_state():
     add_runtime_log(
         "Watcher initialized. "
         f"seen={len(loaded_seen)} events={len(loaded_events)} "
-        f"posted_within_minutes={POSTED_WITHIN_MINUTES} "
+        f"max_stored_events={MAX_STORED_EVENTS} "
         f"telegram_enabled={telegram_settings['enabled']} "
         f"telegram_configured={bool(telegram_settings['bot_token'] and telegram_settings['chat_id'])}",
         "info",
@@ -2824,10 +2769,22 @@ def index():
 @app.get("/api/jobs")
 def api_jobs():
     limit = request.args.get("limit", default=200, type=int) or 200
-    limit = max(1, min(limit, MAX_STORED_EVENTS))
+    limit = max(1, min(limit, 250))
+    offset = max(0, request.args.get("offset", default=0, type=int) or 0)
+    query = (request.args.get("q", "") or "").strip().lower()[:200]
+    keyword = (request.args.get("keyword", "") or "").strip().lower()[:200]
+    status_filter = (request.args.get("status", "") or "").strip().lower()[:40]
 
     with state_lock:
-        jobs = [event for event in state["events"] if event_within_current_window(event)]
+        jobs = list(state["events"])
+    stored_count = len(jobs)
+    if query or keyword or status_filter:
+        jobs = [event for event in jobs if (
+            (not query or query in " ".join(str(event.get(key, "")) for key in ("title", "description", "type_of_work", "wage_salary")).lower())
+            and (not keyword or keyword in " ".join(str(event.get(key, "")) for key in ("title", "description", "type_of_work")).lower())
+            and (not status_filter or status_filter == str(event.get("status") or event.get("priority") or "").lower())
+        )]
+    filtered_count = len(jobs)
 
     jobs.sort(
         key=lambda e: (
@@ -2836,11 +2793,11 @@ def api_jobs():
         ),
         reverse=True,
     )
-    jobs = jobs[:limit]
+    jobs = jobs[offset:offset + limit]
 
     payload_jobs = [enrich_event_for_ui(event, include_heavy=False) for event in jobs]
 
-    return jsonify({"jobs": payload_jobs, "count": len(payload_jobs)})
+    return jsonify({"jobs": payload_jobs, "count": len(payload_jobs), "total": stored_count, "filtered_count": filtered_count, "limit": limit, "offset": offset})
 
 
 @app.get("/api/status")
@@ -2877,7 +2834,7 @@ def api_status():
             "events_count": len(state["events"]),
             "last_cycle_summary": state["last_cycle_summary"],
             "last_error": state["last_error"],
-            "posted_within_minutes": POSTED_WITHIN_MINUTES,
+            "max_stored_events": MAX_STORED_EVENTS,
             "check_interval_seconds": interval_seconds,
             "dashboard_timezone": DASHBOARD_TIMEZONE,
             "dry_run": DRY_RUN,
@@ -3853,8 +3810,8 @@ def healthz():
 def main():
     initialize_state()
     try:
-        added = startup_backfill_recent_jobs(hours=STARTUP_BACKFILL_HOURS)
-        add_runtime_log(f"Startup backfill complete: {added} job(s) loaded from last {STARTUP_BACKFILL_HOURS}h.", "info")
+        added = startup_backfill_listed_jobs()
+        add_runtime_log(f"Startup listing import complete: {added} job(s) loaded.", "info")
     except Exception as exc:
         add_runtime_log(f"Startup backfill failed: {type(exc).__name__}: {exc}", "error")
 

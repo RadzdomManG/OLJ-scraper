@@ -4,6 +4,8 @@
 
 The `frontend/` directory is a Next.js dashboard. Vercel runs the frontend and its protected API routes; the Flask watcher runs separately. Public code users can access only `/jobs`. Supabase Auth verifies the owner, and Supabase Postgres stores hashed access codes. Owner and code checks run on the server. The frontend never sends the Supabase service role key or backend token to the browser.
 
+The watcher keeps a rolling archive of the **5,000 most recently discovered jobs** in `data/job_events.json`. Posted age does not remove a job. When a new discovery would exceed 5,000, the earliest discovered job is removed. The Jobs page shows 100 at a time and searches across the entire stored archive. It refreshes the current page every 30 seconds. Jobs discarded by the older one-hour rule cannot be restored unless the scraper finds them again.
+
 ### 1. Set up Supabase
 
 Create a Supabase project, run [`supabase/schema.sql`](supabase/schema.sql) in its SQL editor, and create the owner account under Authentication → Users. Disable public signups for an owner-only portal. Set `OWNER_EMAIL` to the exact owner account email. The owner password stays in Supabase Auth; there is no `OWNER_PASSWORD_HASH` when using this method.
@@ -240,7 +242,7 @@ Note:
 Useful terminal settings:
 
 ```powershell
-$env:POSTED_WITHIN_MINUTES="60"
+$env:MAX_STORED_EVENTS="5000"
 $env:UI_PORT="8080"
 $env:DESKTOP_APP="true"
 $env:TELEGRAM_ENABLED="true"
