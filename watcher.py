@@ -498,6 +498,7 @@ def age_bucket_counts(events):
 
 def enrich_event_for_ui(event, include_heavy=False, all_events=None):
     enriched = dict(event)
+    enriched["title"] = re.sub(r"^\[(?:onlinejobsph|olj)\]\s*", "", str(enriched.get("title", "")), flags=re.IGNORECASE)
     minutes = event_age_minutes(enriched)
     bucket = age_bucket_from_minutes(minutes)
     severity_label_map = {
@@ -1719,13 +1720,12 @@ def parse_onlinejobs_posted_at_any(posted_text):
 def format_onlinejobs_posted_display(event):
     updated_raw = (event.get("date_updated") or "").strip()
     if updated_raw:
-        return f"{updated_raw} (OLJ DATE UPDATED)"
+        return updated_raw
 
     posted_raw = (event.get("posted_at") or "").strip()
     if not posted_raw:
         return "N/A"
-    # Show OLJ raw value exactly as scraped to prevent date-shift confusion.
-    return f"{posted_raw} (OLJ)"
+    return posted_raw
 
 
 def is_onlinejobs_within_window(job):
@@ -1858,7 +1858,7 @@ def parse_onlinejobs_cards(soup):
         posted_at = posted_tag.get("data-temp", "").strip() if posted_tag else ""
 
         jobs[job_id] = {
-            "title": f"[OnlineJobsPH] {title}",
+            "title": title,
             "url": f"{ONLINEJOBS_BASE_URL}/jobseekers/job/{job_id}",
             "description": description,
             "posted_at": posted_at,
@@ -1895,7 +1895,7 @@ def fetch_jobs(site):
 
                 title = re.sub(r"\s+", " ", a.get_text(" ", strip=True)).strip()
                 parsed_jobs[job_id] = {
-                    "title": f"[OnlineJobsPH] {title}",
+                    "title": title,
                     "url": f"{ONLINEJOBS_BASE_URL}/jobseekers/job/{job_id}",
                     "description": "",
                     "posted_at": "",
