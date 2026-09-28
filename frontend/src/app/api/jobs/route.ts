@@ -1,5 +1,6 @@
 import { backend, owner, viewer } from '@/lib/server';
 import { NextRequest } from 'next/server';
+import { matchJob } from '@/lib/match-profile';
 export async function GET(request: NextRequest) {
   if (!await owner() && !await viewer()) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   const params = new URLSearchParams();
@@ -18,6 +19,7 @@ export async function GET(request: NextRequest) {
       ...safe,
       title: String(job.title || '').replace(/^\[(?:onlinejobsph|olj)\]\s*/i, ''),
       posted_display: String(job.posted_display || '').replace(/\s*\(OLJ(?: DATE UPDATED)?\)$/i, ''),
+      ...matchJob(job),
     };
   });
   return Response.json({ jobs, count: jobs.length, total: data.total ?? jobs.length, filtered_count: data.filtered_count ?? jobs.length, offset: data.offset ?? 0 }, { headers: { 'Cache-Control': 'no-store' } });
