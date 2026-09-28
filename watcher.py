@@ -881,6 +881,7 @@ def normalize_event(item):
         "wage_salary": str(item.get("wage_salary", "")).strip(),
         "hours_per_week": str(item.get("hours_per_week", "")).strip(),
         "date_updated": str(item.get("date_updated", "")).strip(),
+        "detail_checked_at": str(item.get("detail_checked_at", "")).strip(),
         "keyword_matched": bool(item.get("keyword_matched", False)),
         "notification_sent": bool(item.get("notification_sent", False)),
         "repost_suspected": bool(item.get("repost_suspected", False)),
@@ -1796,6 +1797,24 @@ def fetch_job_detail_onlinejobsph(url):
     return metadata
 
 
+def merge_source_details(target, detail):
+    """Copy only fields explicitly present on the source posting."""
+    changed = False
+    for key in ("description", "type_of_work", "wage_salary", "hours_per_week", "date_updated"):
+        new_value = str(detail.get(key, "") or "").strip()
+        if new_value and new_value != target.get(key, ""):
+            target[key] = new_value
+            changed = True
+    return changed
+
+
+def source_detail_due(event):
+    if event.get("type_of_work") and event.get("wage_salary"):
+        return False
+    checked_at = parse_iso_to_utc(str(event.get("detail_checked_at", "")))
+    return checked_at is None or (datetime.now(timezone.utc) - checked_at).total_seconds() >= 3600
+
+
 def parse_onlinejobs_cards(soup):
     jobs = {}
 
@@ -1958,18 +1977,19 @@ def startup_backfill_listed_jobs():
                 if seen_key not in state["seen"]:
                     state["seen"].add(seen_key)
                     seen_changed = True
+                already_stored = seen_key in state["event_keys"]
+            if already_stored:
+                continue
 
+            detail_checked_at = ""
             if detail_fetch_count < MAX_DETAIL_FETCH_PER_CYCLE:
                 detail = fetch_job_detail_onlinejobsph(job["url"])
-                if detail.get("description"):
-                    job["description"] = detail["description"]
-                job["type_of_work"] = detail.get("type_of_work", "")
-                job["wage_salary"] = detail.get("wage_salary", "")
-                job["hours_per_week"] = detail.get("hours_per_week", "")
-                job["date_updated"] = detail.get("date_updated", "")
+                merge_source_details(job, detail)
+                detail_checked_at = now_utc_iso()
                 detail_fetch_count += 1
 
             event = build_event(site, job_id, job, age_seconds=age_seconds, posted_at_iso=posted_at_iso, seen_key=seen_key)
+            event["detail_checked_at"] = detail_checked_at
             fp = event_fingerprint(event)
             event["fingerprint"] = fp
 
@@ -2164,25 +2184,29 @@ def run_check_cycle():
                 else:
                     state["seen"].add(seen_key)
                     seen_changed = True
+                stored_job = next((dict(item) for item in state["events"] if item.get("event_key") == seen_key), None)
+
+            if stored_job:
+                for key in ("description", "type_of_work", "wage_salary", "hours_per_week", "date_updated"):
+                    if stored_job.get(key):
+                        job[key] = stored_job[key]
 
             age_seconds = None
             posted_at_iso = ""
+            detail_checked_at = str(stored_job.get("detail_checked_at", "")) if stored_job else ""
 
             if site["type"] == "onlinejobsph":
                 age_seconds, posted_at_iso = onlinejobs_posting_info(job)
 
-                if detail_fetch_count < MAX_DETAIL_FETCH_PER_CYCLE:
+                if detail_fetch_count < MAX_DETAIL_FETCH_PER_CYCLE and (not stored_job or source_detail_due(stored_job)):
                     detail = fetch_job_detail_onlinejobsph(job["url"])
-                    if detail.get("description"):
-                        job["description"] = detail["description"]
-                    job["type_of_work"] = detail.get("type_of_work", "")
-                    job["wage_salary"] = detail.get("wage_salary", "")
-                    job["hours_per_week"] = detail.get("hours_per_week", "")
-                    job["date_updated"] = detail.get("date_updated", "")
+                    merge_source_details(job, detail)
+                    detail_checked_at = now_utc_iso()
                     detail_fetch_count += 1
                     cycle_summary["detail_fetches"] = detail_fetch_count
 
             event = build_event(site, job_id, job, age_seconds=age_seconds, posted_at_iso=posted_at_iso, seen_key=seen_key)
+            event["detail_checked_at"] = detail_checked_at
             fp = event_fingerprint(event)
             event["fingerprint"] = fp
 
@@ -2216,13 +2240,10 @@ def run_check_cycle():
                                 continue
                             existing["title"] = event.get("title", existing.get("title", ""))
                             existing["url"] = event.get("url", existing.get("url", ""))
-                            existing["description"] = event.get("description", existing.get("description", ""))
+                            merge_source_details(existing, event)
                             existing["posted_at"] = event.get("posted_at", existing.get("posted_at", ""))
                             existing["posted_at_iso"] = event.get("posted_at_iso", existing.get("posted_at_iso", ""))
-                            existing["type_of_work"] = event.get("type_of_work", existing.get("type_of_work", ""))
-                            existing["wage_salary"] = event.get("wage_salary", existing.get("wage_salary", ""))
-                            existing["hours_per_week"] = event.get("hours_per_week", existing.get("hours_per_week", ""))
-                            existing["date_updated"] = event.get("date_updated", existing.get("date_updated", ""))
+                            existing["detail_checked_at"] = event.get("detail_checked_at", existing.get("detail_checked_at", ""))
                             existing["keyword_matched"] = event.get("keyword_matched", existing.get("keyword_matched", False))
                             existing["job_score"] = event.get("job_score", existing.get("job_score", 0))
                             existing["priority"] = event.get("priority", existing.get("priority", ""))
@@ -2255,6 +2276,24 @@ def run_check_cycle():
             cycle_summary["new_events"] += 1
 
         cycle_summary["sites"].append(site_summary)
+
+    if detail_fetch_count < MAX_DETAIL_FETCH_PER_CYCLE:
+        with state_lock:
+            incomplete_jobs = [
+                (item.get("event_key"), item.get("url"))
+                for item in state["events"]
+                if item.get("site_type") == "onlinejobsph" and item.get("url") and source_detail_due(item)
+            ]
+        for event_key, url in incomplete_jobs[:MAX_DETAIL_FETCH_PER_CYCLE - detail_fetch_count]:
+            detail = fetch_job_detail_onlinejobsph(url)
+            with state_lock:
+                stored_job = next((item for item in state["events"] if item.get("event_key") == event_key), None)
+                if stored_job:
+                    merge_source_details(stored_job, detail)
+                    stored_job["detail_checked_at"] = now_utc_iso()
+                    events_changed = True
+            detail_fetch_count += 1
+            cycle_summary["detail_fetches"] = detail_fetch_count
 
     if seen_changed:
         add_runtime_log("Cycle stage: saving seen jobs", "info")
