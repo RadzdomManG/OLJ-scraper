@@ -14,3 +14,4 @@ data/*.json
 data/runtime_check/
 !data/.gitkeep
 !data/telegram_settings.example.json
+.vercel
