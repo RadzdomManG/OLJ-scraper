@@ -1,4 +1,4 @@
-"""Three-customer niche isolation and Supabase Realtime delivery check."""
+"""Three-customer all-jobs visibility and Supabase Realtime delivery check."""
 
 import hashlib
 import hmac
@@ -76,25 +76,23 @@ try:
             page.wait_for_url('**/jobs')
             page.get_by_text('Jobs', exact=True).first.wait_for()
             pages[name] = page
-        expected = {'A': 'Virtual Assistant', 'B': 'Video Editing Specialist', 'C': 'ComfyUI Workflow Developer'}
-        for name, page in pages.items():
-            page.locator('tbody').get_by_text(expected[name], exact=True).first.wait_for(timeout=15000)
-            assert page.locator('tbody').get_by_text('Accounting Clerk', exact=True).count() == 0
-            for other, title in expected.items():
-                if other != name:
-                    assert page.locator('tbody').get_by_text(title, exact=True).count() == 0
-        print('PASS customer A/B/C see only their niche; Accounting hidden')
+        expected = ['Virtual Assistant', 'Video Editing Specialist', 'ComfyUI Workflow Developer', 'Accounting Clerk']
+        for page in pages.values():
+            for title in expected:
+                page.locator('tbody').get_by_text(title, exact=True).first.wait_for(timeout=15000)
+        print('PASS customer A/B/C see all jobs, including unmatched Accounting')
         # The status becomes Live only after Supabase confirms SUBSCRIBED.
         for page in pages.values():
             page.get_by_text('Live', exact=True).first.wait_for(timeout=20000)
         inserted_at = datetime.now(timezone.utc)
         next_job = make_job('va-two', 'Virtual Assistant Realtime Test', 'General VA and administrative VA')
         api('POST', 'jobs', [next_job])
-        pages['A'].locator('tbody').get_by_text('Virtual Assistant Realtime Test', exact=True).first.wait_for(timeout=15000)
+        for page in pages.values():
+            page.locator('tbody').get_by_text('Virtual Assistant Realtime Test', exact=True).first.wait_for(timeout=15000)
         received_at = datetime.now(timezone.utc)
-        assert pages['A'].locator('tbody').get_by_text('Virtual Assistant Realtime Test', exact=True).count() == 1
-        assert pages['B'].locator('tbody').get_by_text('Virtual Assistant Realtime Test', exact=True).count() == 0
-        assert pages['C'].locator('tbody').get_by_text('Virtual Assistant Realtime Test', exact=True).count() == 0
+        assert 'PERFECT MATCH' in pages['A'].locator('tbody tr').filter(has_text='Virtual Assistant Realtime Test').inner_text()
+        for name in ('B', 'C'):
+            assert 'General listing' in pages[name].locator('tbody tr').filter(has_text='Virtual Assistant Realtime Test').inner_text()
         print('PASS realtime insert without refresh; inserted_at=', inserted_at.isoformat(), 'received_at=', received_at.isoformat(), 'delay_seconds=', round((received_at - inserted_at).total_seconds(), 2))
         browser.close()
 finally:

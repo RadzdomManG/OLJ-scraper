@@ -27,19 +27,12 @@ export async function GET(request: NextRequest) {
   const offset = Number(search.get('offset') || 0);
   const safeOffset = Number.isSafeInteger(offset) && offset >= 0 && offset <= 5000 ? offset : 0;
   const selectedNiche = clean(search.get('niche'));
-  const priority = clean(search.get('priority'));
-  const allowed = member ? (selectedNiche && preferences.niches.includes(selectedNiche) ? [selectedNiche] : preferences.niches.filter(id => validNicheIds.has(id))) : [];
-  if (member && !allowed.length) return Response.json({ jobs: [], count: 0, total: 0, filtered_count: 0, offset: safeOffset });
-  const sort = clean(search.get('sort'));
-  let query = member
-    ? db().rpc(sort === 'score' ? 'customer_jobs_ranked' : 'customer_jobs', { p_niches: allowed, p_min_score: priority === 'perfect' ? 100 : priority === 'strong' ? 80 : 1 }, { count: 'exact' }).select(FIELDS)
-    : db().from('jobs').select(FIELDS, { count: 'exact' });
-  if (member) {
-    // Membership selection and score threshold are applied inside the SQL RPC.
-  } else if (selectedNiche && validNicheIds.has(selectedNiche)) query = query.contains('niches', [selectedNiche]);
+  const sort = isOwner ? clean(search.get('sort')) : 'detected';
+  let query = db().from('jobs').select(FIELDS, { count: 'exact' });
+  if (isOwner && selectedNiche && validNicheIds.has(selectedNiche)) query = query.contains('niches', [selectedNiche]);
 
   const q = safeSearch(clean(search.get('q') || search.get('keyword'), 100));
-  if (q) query = query.or('title.ilike.%' + q + '%,description.ilike.%' + q + '%,company.ilike.%' + q + '%');
+  if (q) query = query.or('title.ilike.%' + q + '%,description.ilike.%' + q + '%');
   const source = clean(search.get('source'));
   if (isOwner && source && /^[a-z0-9_-]+$/.test(source)) query = query.eq('source', source);
   if (isOwner && clean(search.get('stage'))) query = query.eq('stage', clean(search.get('stage')));
@@ -47,24 +40,24 @@ export async function GET(request: NextRequest) {
   if (isOwner && clean(search.get('notified')) === 'not_sent') query = query.eq('notification_sent', false);
   if (isOwner && clean(search.get('status'))) query = query.eq('owner_priority', clean(search.get('status')));
   const workType = clean(search.get('work_type'));
-  if (workType) query = query.eq('work_type', workType);
+  if (isOwner && workType) query = query.eq('work_type', workType);
   const salary = Number(search.get('salary_min'));
-  if (Number.isFinite(salary) && salary > 0) query = query.gte('salary_min', salary);
+  if (isOwner && Number.isFinite(salary) && salary > 0) query = query.gte('salary_min', salary);
   const currency = clean(search.get('salary_currency'));
   const period = clean(search.get('salary_period'));
-  if (currency && /^[A-Z]{3}$/.test(currency)) query = query.eq('salary_currency', currency);
-  if (period && ['hour', 'day', 'week', 'month', 'year', 'project'].includes(period)) query = query.eq('salary_period', period);
+  if (isOwner && currency && /^[A-Z]{3}$/.test(currency)) query = query.eq('salary_currency', currency);
+  if (isOwner && period && ['hour', 'day', 'week', 'month', 'year', 'project'].includes(period)) query = query.eq('salary_period', period);
   const from = clean(search.get('date_from'), 10);
   const to = clean(search.get('date_to'), 10);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(from)) query = query.gte('first_seen_at', from + 'T00:00:00+08:00');
-  if (/^\d{4}-\d{2}-\d{2}$/.test(to)) query = query.lt('first_seen_at', new Date(new Date(to + 'T00:00:00+08:00').getTime() + 86400000).toISOString());
+  if (isOwner && /^\d{4}-\d{2}-\d{2}$/.test(from)) query = query.gte('first_seen_at', from + 'T00:00:00+08:00');
+  if (isOwner && /^\d{4}-\d{2}-\d{2}$/.test(to)) query = query.lt('first_seen_at', new Date(new Date(to + 'T00:00:00+08:00').getTime() + 86400000).toISOString());
   const since = clean(search.get('since'), 40);
-  if (since && !Number.isNaN(Date.parse(since))) query = query.gte('first_seen_at', since);
+  if (isOwner && since && !Number.isNaN(Date.parse(since))) query = query.gte('first_seen_at', since);
   const after = clean(search.get('after'), 40);
-  if (after && !Number.isNaN(Date.parse(after))) query = query.gt('first_seen_at', after);
+  if (isOwner && after && !Number.isNaN(Date.parse(after))) query = query.gt('first_seen_at', after);
   if (sort === 'posted') query = query.order('source_posted_at', { ascending: false, nullsFirst: false }).order('first_seen_at', { ascending: false });
   else if (sort === 'salary' && currency && period) query = query.order('salary_max', { ascending: false, nullsFirst: false }).order('first_seen_at', { ascending: false });
-  else if (sort !== 'score' || !member) query = query.order('first_seen_at', { ascending: false });
+  else query = query.order('first_seen_at', { ascending: false });
   query = query.range(safeOffset, safeOffset + PAGE_SIZE - 1);
   const { data, error, count } = await query;
   if (error) return Response.json({ error: 'Unable to load jobs' }, { status: 500 });

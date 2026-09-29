@@ -1003,18 +1003,36 @@ def save_job_events(events):
     schedule_supabase_sync(events)
 
 
+_supabase_schedule_lock = threading.Lock()
+_supabase_pending_snapshot = None
+_supabase_worker_running = False
+
+
 def schedule_supabase_sync(events):
     if not supabase_configured():
         return
-    snapshot = list(events)
+    global _supabase_pending_snapshot, _supabase_worker_running
+    with _supabase_schedule_lock:
+        _supabase_pending_snapshot = list(events)
+        if _supabase_worker_running:
+            return
+        _supabase_worker_running = True
 
     def run():
-        try:
-            result = sync_jobs(JOB_STORE, snapshot)
-            if result.get('upserted') or result.get('pruned'):
-                add_runtime_log(f"Supabase mirrored {result.get('upserted', 0)} changed jobs; removed {result.get('pruned', 0)} old jobs.", 'info')
-        except Exception as exc:
-            add_runtime_log(f"Supabase job sync failed: {type(exc).__name__}: {exc}", 'error')
+        global _supabase_pending_snapshot, _supabase_worker_running
+        while True:
+            with _supabase_schedule_lock:
+                snapshot = _supabase_pending_snapshot
+                _supabase_pending_snapshot = None
+                if snapshot is None:
+                    _supabase_worker_running = False
+                    return
+            try:
+                result = sync_jobs(JOB_STORE, snapshot)
+                if result.get('upserted') or result.get('pruned'):
+                    add_runtime_log(f"Supabase mirrored {result.get('upserted', 0)} changed jobs; removed {result.get('pruned', 0)} old jobs.", 'info')
+            except Exception as exc:
+                add_runtime_log(f"Supabase job sync failed: {type(exc).__name__}: {exc}", 'error')
 
     threading.Thread(target=run, daemon=True, name='supabase-job-sync').start()
 
@@ -2476,6 +2494,10 @@ def run_check_cycle():
             state.setdefault('source_health', {})[site['type']] = health
         JOB_STORE.set_source_health(site['type'], health)
         cycle_summary["sites"].append(site_summary)
+        if site_summary["new_events"]:
+            with state_lock:
+                source_snapshot = list(state["events"])
+            save_job_events(source_snapshot)
 
     if detail_fetch_count < MAX_DETAIL_FETCH_PER_CYCLE:
         with state_lock:

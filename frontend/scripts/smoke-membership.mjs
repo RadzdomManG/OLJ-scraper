@@ -28,7 +28,7 @@ try {
   check(cookie.startsWith('aurelius_code='), 'session cookie issued');
   check(/Max-Age=34560000/i.test(signin.response.headers.get('set-cookie') || ''), 'customer cookie persists across visits');
   check((await request('/api/jobs', {}, cookie)).response.status === 409, 'profile required before jobs');
-  const put = await request('/api/preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ niches: ['comfyui'], keywords: ['ComfyUI'] }) }, cookie);
+  const put = await request('/api/preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ niches: ['comfyui'] }) }, cookie);
   check(put.response.status === 200, 'customer can save niche without resending code');
   const preferences = await request('/api/preferences', {}, cookie);
   check(preferences.data.selected?.niches?.includes('comfyui'), 'niche persists');
@@ -38,6 +38,12 @@ try {
   const jobs = await request('/api/jobs', {}, cookie);
   check(jobs.response.status === 200, 'customer receives live jobs');
   check(jobs.data.jobs?.length > 0, 'customer sees stored jobs');
+  const archive = await db.from('jobs').select('event_key', { count: 'exact', head: true });
+  if (archive.error) throw archive.error;
+  check(jobs.data.total === archive.count, 'customer sees the full archive regardless of niche');
+  check(jobs.data.jobs.some(job => job.match_score === 0), 'unmatched jobs remain visible');
+  const ignoredFilters = await request('/api/jobs?priority=perfect&niche=virtual-assistant&salary_min=999999&source=contra', {}, cookie);
+  check(ignoredFilters.data.total === archive.count, 'customer request cannot hide jobs with extra filters');
   const first = jobs.data.jobs[0];
   check(!['site', 'site_type', 'source', 'event_key', 'matched_keywords', 'notification_sent', 'job_id', 'source_posted_raw', 'source_posted_at'].some(key => Object.hasOwn(first, key)), 'customer response excludes source and owner internals');
   check(typeof first.match_score === 'number', 'customer jobs include personal match score');

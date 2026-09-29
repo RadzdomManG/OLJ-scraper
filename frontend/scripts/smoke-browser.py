@@ -39,6 +39,9 @@ try:
         page.get_by_text('Jobs', exact=True).first.wait_for()
         page.get_by_role('button', name='Load more jobs').wait_for(timeout=15000)
         assert not page.get_by_label('Source').count()
+        for filter_label in ('Niche', 'Date', 'Work type', 'Minimum salary', 'Salary currency', 'Salary period', 'Match priority', 'Sort jobs'):
+            assert not page.get_by_label(filter_label, exact=True).count(), filter_label
+        assert page.get_by_placeholder('Search titles or keywords...').is_visible()
         assert not page.get_by_text('OLJ', exact=True).count()
         assert page.get_by_role('link', name='My niche').is_visible()
         assert not page.get_by_role('link', name='Access Codes').count()

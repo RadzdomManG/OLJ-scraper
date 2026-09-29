@@ -9,9 +9,8 @@ export async function GET(request: Request) {
   const member = isOwner ? null : await viewer();
   if (!isOwner && !member) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   const client = db();
-  const preferences = member ? await client.from('viewer_preferences').select('niches').eq('code_id', member.id).maybeSingle() : null;
+  const preferences = member ? await client.from('viewer_preferences').select('code_id').eq('code_id', member.id).maybeSingle() : null;
   if (member && (preferences?.error || !preferences?.data)) return Response.json({ error: 'Choose your niche first' }, { status: 409 });
-  const selected: string[] = preferences?.data?.niches || [];
   const encoder = new TextEncoder();
   let channel: ReturnType<typeof client.channel> | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -35,7 +34,6 @@ export async function GET(request: Request) {
         if (member) {
           const { data } = await client.from('access_codes').select('status,expires_at').eq('id', member.id).maybeSingle();
           if (!data || data.status !== 'active' || (data.expires_at && new Date(data.expires_at) <= new Date())) { send('expired', {}); void close(); return; }
-          if (!Array.isArray(job.niches) || !job.niches.some(niche => selected.includes(String(niche)))) return;
         }
         send('job', { url: job.source_url, first_seen_at: job.first_seen_at });
       }).subscribe(status => { if (status === 'SUBSCRIBED') send('ready', { ok: true }); else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') send('status', { realtime: false }); });

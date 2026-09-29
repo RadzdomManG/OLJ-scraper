@@ -6,7 +6,6 @@ import { ArrowUpRight, BriefcaseBusiness, RefreshCw, Search, X } from 'lucide-re
 
 type Job = Record<string, unknown>;
 type Source = { id: string; label: string };
-type Niche = { id: string; label: string; group: string };
 const text = (value: unknown) => value == null || String(value).trim() === '' ? 'Not provided' : String(value);
 const urlOf = (job: Job) => typeof job.url === 'string' && /^https?:\/\//i.test(job.url) ? job.url : '';
 const PHT = new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
@@ -19,7 +18,7 @@ const detected = (job: Job) => exactPht(job.first_seen_at) || 'Unavailable';
 const salary = (job: Job) => text(job.salary_raw || job.wage_salary);
 const work = (job: Job) => text(job.work_type || job.type_of_work);
 const score = (job: Job, owner: boolean) => owner ? Number(job.job_score || 0) : Number(job.match_score || 0);
-const priority = (job: Job, owner: boolean) => owner ? text(job.priority) : score(job, false) >= 100 ? 'PERFECT MATCH' : score(job, false) >= 80 ? `${score(job, false)}% MATCH` : 'Possible match';
+const priority = (job: Job, owner: boolean) => owner ? text(job.priority) : score(job, false) >= 100 ? 'PERFECT MATCH' : score(job, false) >= 80 ? `${score(job, false)}% MATCH` : score(job, false) > 0 ? 'Possible match' : 'General listing';
 const priorityClass = (job: Job, owner: boolean) => {
   const value = score(job, owner);
   return value >= 100 ? 'bg-[#dff7e8] text-[#14763c] font-bold'
@@ -39,15 +38,12 @@ export default function Jobs({ owner = false, sources = [] }: { owner?: boolean;
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [selectedNiche, setSelectedNiche] = useState('');
-  const [availableNiches, setAvailableNiches] = useState<Niche[]>([]);
   const [source, setSource] = useState('');
   const [workType, setWorkType] = useState('');
   const [salaryMin, setSalaryMin] = useState('');
   const [currency, setCurrency] = useState('');
   const [period, setPeriod] = useState('');
   const [datePreset, setDatePreset] = useState('');
-  const [priorityFilter, setPriorityFilter] = useState('');
   const [sort, setSort] = useState('detected');
   const [stage, setStage] = useState('');
   const [selected, setSelected] = useState<Job | null>(null);
@@ -59,27 +55,18 @@ export default function Jobs({ owner = false, sources = [] }: { owner?: boolean;
   const [newUrls, setNewUrls] = useState<Set<string>>(new Set());
 
   useEffect(() => { const timer = setTimeout(() => setDebouncedSearch(search), 350); return () => clearTimeout(timer); }, [search]);
-  useEffect(() => {
-    if (owner) return;
-    void fetch('/api/preferences', { cache: 'no-store' }).then(response => response.json()).then(data => {
-      const ids = new Set<string>(data.selected?.niches || []);
-      setAvailableNiches((data.niches || []).filter((niche: Niche) => ids.has(niche.id)));
-    }).catch(() => undefined);
-  }, [owner]);
-
   const load = useCallback(async (quiet = false, more = false) => {
     if (more) setLoadingMore(true); else if (!quiet) setLoading(true);
-    const params = new URLSearchParams({ offset: String(more ? fetchedCount.current : 0), sort });
+    const params = new URLSearchParams({ offset: String(more ? fetchedCount.current : 0) });
     if (debouncedSearch) params.set('q', debouncedSearch);
-    if (selectedNiche) params.set('niche', selectedNiche);
+    if (owner) params.set('sort', sort);
     if (owner && source) params.set('source', source);
-    if (workType) params.set('work_type', workType);
-    if (salaryMin) params.set('salary_min', salaryMin);
-    if (currency) params.set('salary_currency', currency);
-    if (period) params.set('salary_period', period);
-    if (priorityFilter && !owner) params.set('priority', priorityFilter);
+    if (owner && workType) params.set('work_type', workType);
+    if (owner && salaryMin) params.set('salary_min', salaryMin);
+    if (owner && currency) params.set('salary_currency', currency);
+    if (owner && period) params.set('salary_period', period);
     if (stage && owner) params.set('stage', stage);
-    if (datePreset) {
+    if (owner && datePreset) {
       const now = new Date();
       if (datePreset === 'today') {
         const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
@@ -107,7 +94,7 @@ export default function Jobs({ owner = false, sources = [] }: { owner?: boolean;
       setUpdated(new Date()); setError('');
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to load jobs'); }
     finally { setLoading(false); setLoadingMore(false); }
-  }, [debouncedSearch, selectedNiche, source, owner, workType, salaryMin, currency, period, priorityFilter, stage, datePreset, sort]);
+  }, [debouncedSearch, source, owner, workType, salaryMin, currency, period, stage, datePreset, sort]);
 
   useEffect(() => { queueMicrotask(() => { fetchedCount.current = 0; void load(); }); }, [load]);
   useEffect(() => { const interval = setInterval(() => void load(true), 30000); return () => clearInterval(interval); }, [load]);
@@ -135,24 +122,22 @@ export default function Jobs({ owner = false, sources = [] }: { owner?: boolean;
   }
 
   return <>
-    <div className="flex flex-wrap items-start justify-between gap-4 mb-8"><div><div className="text-xs uppercase tracking-[.18em] text-[#8f98a1] font-semibold mb-2">Opportunities</div><h1 className="text-3xl font-semibold tracking-tight">Jobs <span className="ml-2 align-middle text-xs px-2.5 py-1 rounded-full bg-[#e5f5ea] text-[#29844e]">{live ? 'Live' : 'Updating'}</span></h1><p className="text-[#89919b] text-sm mt-2">Newly detected jobs appear first. Times are always shown in PHT.</p></div><button className="button-soft flex items-center gap-2 text-sm" onClick={() => void load()}><RefreshCw size={15}/> Refresh jobs</button></div>
-    <div className="grid sm:grid-cols-2 gap-4 mb-6"><div className="card p-5"><div className="text-sm text-[#8d969f]">{owner ? 'Stored jobs' : 'Jobs in your niches'}</div><div className="text-3xl font-semibold mt-2">{total.toLocaleString()}</div></div><div className="card p-5"><div className="text-sm text-[#8d969f]">Last checked</div><div className="text-xl font-semibold mt-3">{updated ? updated.toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' }) + ' PHT' : 'Not yet'}</div><div className="text-xs text-[#9da5ac] mt-2">Live inserts with automatic refresh fallback</div></div></div>
-    <div className="card"><div className="p-5 grid sm:grid-cols-2 xl:grid-cols-4 gap-3 border-b border-[#eff0f2]">
-      <div className="relative sm:col-span-2"><Search size={17} className="absolute left-3 top-3 text-[#9ba3ac]"/><input className="input pl-10" placeholder="Search jobs..." value={search} onChange={event => setSearch(event.target.value)}/></div>
-      {!owner && <select aria-label="Niche" className="input" value={selectedNiche} onChange={event => setSelectedNiche(event.target.value)}><option value="">All my niches</option>{availableNiches.map(niche => <option key={niche.id} value={niche.id}>{niche.label}</option>)}</select>}
+    <div className="flex flex-wrap items-start justify-between gap-4 mb-8"><div><div className="text-xs uppercase tracking-[.18em] text-[#8f98a1] font-semibold mb-2">Opportunities</div><h1 className="text-3xl font-semibold tracking-tight">Jobs <span className="ml-2 align-middle text-xs px-2.5 py-1 rounded-full bg-[#e5f5ea] text-[#29844e]">{live ? 'Live' : 'Updating'}</span></h1><p className="text-[#89919b] text-sm mt-2">{owner ? 'Newly detected jobs appear first.' : 'Every new job appears here. Your niche highlights relevant matches.'} Times are shown in PHT.</p></div>{owner && <button className="button-soft flex items-center gap-2 text-sm" onClick={() => void load()}><RefreshCw size={15}/> Refresh jobs</button>}</div>
+    <div className="grid sm:grid-cols-2 gap-4 mb-6"><div className="card p-5"><div className="text-sm text-[#8d969f]">Stored jobs</div><div className="text-3xl font-semibold mt-2">{total.toLocaleString()}</div></div><div className="card p-5"><div className="text-sm text-[#8d969f]">Last checked</div><div className="text-xl font-semibold mt-3">{updated ? updated.toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' }) + ' PHT' : 'Not yet'}</div><div className="text-xs text-[#9da5ac] mt-2">Live updates with automatic refresh fallback</div></div></div>
+    <div className="card"><div className={'p-5 grid gap-3 border-b border-[#eff0f2] ' + (owner ? 'sm:grid-cols-2 xl:grid-cols-4' : '')}>
+      <div className="relative sm:col-span-2"><Search size={17} className="absolute left-3 top-3 text-[#9ba3ac]"/><input className="input pl-10" placeholder="Search titles or keywords..." value={search} onChange={event => setSearch(event.target.value)}/></div>
       {owner && <select aria-label="Source" className="input" value={source} onChange={event => setSource(event.target.value)}><option value="">All sources</option>{sources.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select>}
-      <select aria-label="Date" className="input" value={datePreset} onChange={event => setDatePreset(event.target.value)}><option value="">Any detection date</option><option value="hour">Last hour</option><option value="today">Today PHT</option><option value="day">Last 24 hours</option><option value="three">Last 3 days</option><option value="week">Last 7 days</option></select>
-      <select aria-label="Work type" className="input" value={workType} onChange={event => setWorkType(event.target.value)}><option value="">Any work type</option>{['Full-time','Part-time','Contract','Freelance','Temporary','Hourly','Fixed price','Project'].map(type => <option key={type} value={type}>{type}</option>)}</select>
-      <input aria-label="Minimum salary" className="input" type="number" min="0" value={salaryMin} onChange={event => setSalaryMin(event.target.value)} placeholder="Minimum salary"/>
-      <select aria-label="Salary currency" className="input" value={currency} onChange={event => setCurrency(event.target.value)}><option value="">Any currency</option><option value="USD">USD</option><option value="PHP">PHP</option></select>
-      <select aria-label="Salary period" className="input" value={period} onChange={event => setPeriod(event.target.value)}><option value="">Any pay period</option>{['hour','day','week','month','year','project'].map(item => <option key={item} value={item}>{item}</option>)}</select>
-      {!owner && <select aria-label="Match priority" className="input" value={priorityFilter} onChange={event => setPriorityFilter(event.target.value)}><option value="">All matches</option><option value="strong">80% and above</option><option value="perfect">Perfect match</option></select>}
+      {owner && <select aria-label="Date" className="input" value={datePreset} onChange={event => setDatePreset(event.target.value)}><option value="">Any detection date</option><option value="hour">Last hour</option><option value="today">Today PHT</option><option value="day">Last 24 hours</option><option value="three">Last 3 days</option><option value="week">Last 7 days</option></select>}
+      {owner && <select aria-label="Work type" className="input" value={workType} onChange={event => setWorkType(event.target.value)}><option value="">Any work type</option>{['Full-time','Part-time','Contract','Freelance','Temporary','Hourly','Fixed price','Project'].map(type => <option key={type} value={type}>{type}</option>)}</select>}
+      {owner && <input aria-label="Minimum salary" className="input" type="number" min="0" value={salaryMin} onChange={event => setSalaryMin(event.target.value)} placeholder="Minimum salary"/>}
+      {owner && <select aria-label="Salary currency" className="input" value={currency} onChange={event => setCurrency(event.target.value)}><option value="">Any currency</option><option value="USD">USD</option><option value="PHP">PHP</option></select>}
+      {owner && <select aria-label="Salary period" className="input" value={period} onChange={event => setPeriod(event.target.value)}><option value="">Any pay period</option>{['hour','day','week','month','year','project'].map(item => <option key={item} value={item}>{item}</option>)}</select>}
       {owner && <select aria-label="Job stage" className="input" value={stage} onChange={event => setStage(event.target.value)}><option value="">All stages</option>{['new','saved','applied','ignored'].map(item => <option key={item} value={item}>{item}</option>)}</select>}
-      <select aria-label="Sort jobs" className="input" value={sort} onChange={event => setSort(event.target.value)}><option value="detected">Newest detected</option><option value="posted">Newest posted</option>{!owner && <option value="score">Highest match</option>}<option value="salary" disabled={!currency || !period}>Highest salary (choose currency and period)</option></select>
+      {owner && <select aria-label="Sort jobs" className="input" value={sort} onChange={event => setSort(event.target.value)}><option value="detected">Newest detected</option><option value="posted">Newest posted</option><option value="salary" disabled={!currency || !period}>Highest salary (choose currency and period)</option></select>}
     </div>
     {error ? <div className="p-12 text-center"><div className="font-semibold">Unable to load jobs</div><p role="alert" className="text-sm text-[#8e97a0] mt-2">{error}</p><button className="button-soft mt-5" onClick={() => void load()}>Try again</button></div>
       : loading ? <div className="p-12 text-center text-[#8e97a0]">Loading opportunities...</div>
-      : jobs.length === 0 ? <div className="p-12 text-center"><BriefcaseBusiness className="mx-auto text-[#aab1b8]" size={28}/><div className="font-semibold mt-4">No matching jobs yet</div><p className="text-sm text-[#8e97a0] mt-2">Try another niche or date range.</p></div>
+      : jobs.length === 0 ? <div className="p-12 text-center"><BriefcaseBusiness className="mx-auto text-[#aab1b8]" size={28}/><div className="font-semibold mt-4">No jobs found</div><p className="text-sm text-[#8e97a0] mt-2">{search ? 'Try another title or keyword.' : 'New jobs will appear here as they are discovered.'}</p></div>
       : <><div className="hidden lg:block overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-[#fafbfb] text-[#929aa2] text-xs uppercase tracking-wide"><tr>{['Title','Work type','Salary','Posted','Detected','Score','Priority',''].map(label => <th key={label} className="px-4 py-4 font-semibold">{label}</th>)}</tr></thead><tbody>{jobs.map((job,index) => <tr key={urlOf(job) || index} onClick={() => setSelected(job)} className="border-t border-[#f0f1f2] hover:bg-[#fafbfc] cursor-pointer"><td className="px-4 py-4 font-semibold max-w-72"><span className="block truncate">{text(job.title)}</span>{owner && Boolean(job.source) && <span className="text-xs text-[#7d858e]">{String(job.source)}</span>}{(newUrls.has(urlOf(job)) || recent(job)) && <span className="ml-2 text-xs text-[#14763c] font-bold">NEW</span>}</td><td className="px-4 py-4">{work(job)}</td><td className="px-4 py-4">{salary(job)}</td><td className="px-4 py-4 text-[#65707a]">{posted(job)}</td><td className="px-4 py-4 text-[#65707a]">{detected(job)}</td><td className="px-4 py-4">{score(job,owner)}</td><td className="px-4 py-4"><span className={'rounded-full px-3 py-1.5 text-xs ' + priorityClass(job,owner)}>{priority(job,owner)}</span></td><td className="px-4 py-4">{urlOf(job) && <a aria-label="Open job" href={urlOf(job)} target="_blank" rel="noopener noreferrer" onClick={event => event.stopPropagation()}><ArrowUpRight size={17}/></a>}</td></tr>)}</tbody></table></div>
       <div className="lg:hidden divide-y divide-[#eff0f2]">{jobs.map((job,index) => <button key={urlOf(job) || index} onClick={() => setSelected(job)} className="p-5 w-full text-left"><div className="flex justify-between gap-3"><div className="font-semibold">{text(job.title)}</div>{(newUrls.has(urlOf(job)) || recent(job)) && <span className="text-xs text-[#14763c] font-bold">NEW</span>}</div>{owner && Boolean(job.source) && <div className="text-xs text-[#87919a] mt-1">{String(job.source)}</div>}<div className="text-sm text-[#66707b] mt-2">{salary(job)} · {work(job)}</div><div className="text-xs text-[#87919a] mt-2">Posted: {posted(job)}</div><div className="text-xs text-[#87919a] mt-1">Detected: {detected(job)}</div><div className="mt-3"><span className={'rounded-full px-3 py-1.5 text-xs ' + priorityClass(job,owner)}>{priority(job,owner)}</span></div></button>)}</div></>}
     <div className="border-t border-[#eff0f2] px-5 py-4 flex items-center justify-between gap-4 text-xs text-[#9199a1]"><span>Showing {jobs.length.toLocaleString()} of {total.toLocaleString()} jobs</span>{loadedCount < total && <button disabled={loadingMore} className="button-soft" onClick={() => void load(false,true)}>{loadingMore ? 'Loading...' : 'Load more jobs'}</button>}</div></div>
