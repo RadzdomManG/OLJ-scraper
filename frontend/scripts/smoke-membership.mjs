@@ -39,7 +39,7 @@ try {
   check(jobs.response.status === 200, 'customer receives live jobs');
   check(jobs.data.jobs?.length > 0, 'customer sees stored jobs');
   const first = jobs.data.jobs[0];
-  check(!['site', 'site_type', 'event_key', 'matched_keywords', 'notification_sent', 'job_id'].some(key => Object.hasOwn(first, key)), 'customer response excludes owner internals');
+  check(!['site', 'site_type', 'source', 'event_key', 'matched_keywords', 'notification_sent', 'job_id', 'source_posted_raw', 'source_posted_at'].some(key => Object.hasOwn(first, key)), 'customer response excludes source and owner internals');
   check(typeof first.match_score === 'number', 'customer jobs include personal match score');
   const second = await request('/api/auth/code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
   check(second.response.status === 200, 'second permitted sign in works');

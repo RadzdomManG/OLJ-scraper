@@ -63,8 +63,9 @@ and notification status. Owners can mark jobs **Saved**, **Applied**, or
 **Ignored**. The 5,000 newest discoveries remain in the archive.
 
 The watcher mirrors the archive to private Supabase `jobs` records. Customer
-queries apply each customer's saved niches in the database, with source, date,
-salary, work type, and match filters. The browser receives new matching rows
+queries apply each customer's saved niches in the database, with date, salary,
+work type, and match filters. Source names and source controls are owner-only.
+The browser receives new matching rows
 through a server-side Realtime subscription and also refreshes every 30 seconds.
 
 The owner **Keywords** page edits include and exclude terms for new alerts.

@@ -6,6 +6,10 @@ const FIELDS = 'event_key,source,source_job_id,source_url,title,company,descript
 const PAGE_SIZE = 100;
 const clean = (value: string | null, max = 100) => (value || '').trim().slice(0, max);
 const safeSearch = (value: string) => value.replace(/[^\p{L}\p{N} .+#-]/gu, '').trim();
+const PLATFORM_NAMES = /\b(?:onlinejobs(?:\.ph)?|olj|freelancer\.com|people\s*per\s*hour(?:\.com)?|wellfound(?:\.com)?|remotive(?:\.com)?|contra(?:\.com)?|we\s*work\s*remotely|guru\.com|jobicy(?:\.com)?|himalayas\.app|virtualstaff(?:\.ph)?)\b/gi;
+const customerText = (value: unknown) => typeof value === 'string'
+  ? value.replace(PLATFORM_NAMES, '').replace(/\[\s*\]/g, '').replace(/\(\s*\)/g, '').replace(/ {2,}/g, ' ').trim()
+  : value;
 
 export async function GET(request: NextRequest) {
   const isOwner = !!await owner();
@@ -37,7 +41,7 @@ export async function GET(request: NextRequest) {
   const q = safeSearch(clean(search.get('q') || search.get('keyword'), 100));
   if (q) query = query.or('title.ilike.%' + q + '%,description.ilike.%' + q + '%,company.ilike.%' + q + '%');
   const source = clean(search.get('source'));
-  if (source && /^[a-z0-9_-]+$/.test(source)) query = query.eq('source', source);
+  if (isOwner && source && /^[a-z0-9_-]+$/.test(source)) query = query.eq('source', source);
   if (isOwner && clean(search.get('stage'))) query = query.eq('stage', clean(search.get('stage')));
   if (isOwner && clean(search.get('notified')) === 'sent') query = query.eq('notification_sent', true);
   if (isOwner && clean(search.get('notified')) === 'not_sent') query = query.eq('notification_sent', false);
@@ -73,13 +77,13 @@ export async function GET(request: NextRequest) {
       posted_at: job.source_posted_at || job.source_posted_raw };
     // Customer response excludes owner state and internal event identifiers.
     const safe = {
-      title, url: job.source_url, source: job.source, company: job.company, description: job.description,
-      skills: job.skills, location: job.location, category: job.category,
+      title: customerText(title), url: job.source_url, company: customerText(job.company), description: customerText(job.description),
+      skills: Array.isArray(job.skills) ? job.skills.map(customerText).filter(Boolean) : [], location: customerText(job.location), category: customerText(job.category),
       salary_raw: job.salary_raw, salary_min: job.salary_min, salary_max: job.salary_max,
       salary_currency: job.salary_currency, salary_period: job.salary_period,
       wage_salary: job.salary_raw, type_of_work: job.work_type,
-      work_type_raw: job.work_type_raw, source_posted_raw: job.source_posted_raw,
-      source_posted_at: job.source_posted_at, first_seen_at: job.first_seen_at,
+      work_type_raw: job.work_type_raw, posted_text: customerText(job.source_posted_raw),
+      posted_at: job.source_posted_at, first_seen_at: job.first_seen_at,
       primary_niche: job.primary_niche, niches: job.niches,
     };
     return { ...safe, ...customerMatch(job, preferences) };

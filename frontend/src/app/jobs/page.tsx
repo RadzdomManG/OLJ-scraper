@@ -10,4 +10,4 @@ const ownerSources = [
   { id: 'jobicy', label: 'Jobicy' }, { id: 'himalayas', label: 'Himalayas' },
   { id: 'virtualstaff', label: 'VirtualStaff.ph' },
 ];
-export default async function JobsPage() { const isOwner = !!await owner(); if (!isOwner) { const member = await viewer(); if (!member) redirect('/login'); const { data } = await db().from('viewer_preferences').select('code_id').eq('code_id', member.id).maybeSingle(); if (!data) redirect('/preferences'); } return <Shell owner={isOwner}><Jobs owner={isOwner} sources={ownerSources}/></Shell>; }
+export default async function JobsPage() { const isOwner = !!await owner(); if (!isOwner) { const member = await viewer(); if (!member) redirect('/login'); const { data } = await db().from('viewer_preferences').select('code_id').eq('code_id', member.id).maybeSingle(); if (!data) redirect('/preferences'); } return <Shell owner={isOwner}><Jobs owner={isOwner} sources={isOwner ? ownerSources : []}/></Shell>; }
