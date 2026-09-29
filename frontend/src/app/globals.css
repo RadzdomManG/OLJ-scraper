@@ -5,6 +5,7 @@ button, input, select { font: inherit; }
 button { cursor: pointer; }
 .card { background: white; border: 1px solid #e8eaed; border-radius: 16px; box-shadow: 0 2px 8px rgba(25,30,40,.025); }
 .input { width: 100%; border: 1px solid #e2e5e9; background: white; border-radius: 9px; padding: 11px 13px; outline: none; }
+.input-search { padding-left: 40px; }
 .input:focus { border-color: #8b929b; box-shadow: 0 0 0 3px #e9ebee; }
 .button { background: #1e2228; color: white; padding: 10px 16px; border-radius: 9px; font-weight: 600; }
 .button:hover { background: #343a42; }

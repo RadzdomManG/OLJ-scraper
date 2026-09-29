@@ -26,7 +26,7 @@ member_id = record.json()[0]['id']
 try:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
-        page = browser.new_page()
+        page = browser.new_page(viewport={'width': 1600, 'height': 900})
         page.goto(f'{base}/login')
         page.get_by_label('Access code', exact=True).fill(code)
         page.get_by_role('button', name='Continue').click()
@@ -38,6 +38,15 @@ try:
         page.wait_for_url('**/jobs')
         page.get_by_text('Jobs', exact=True).first.wait_for()
         page.get_by_role('button', name='Load more jobs').wait_for(timeout=15000)
+        posted_cell = page.locator('tbody tr').first.locator('td').nth(3).inner_text()
+        assert 'PHT' in posted_cell or 'Posting time' in posted_cell, posted_cell
+        assert page.get_by_text('Aurelius', exact=True).first.is_visible()
+        screenshot_dir = Path('../data/runtime_check')
+        screenshot_dir.mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=str(screenshot_dir / 'customer-jobs-desktop.png'), full_page=False)
+        page.set_viewport_size({'width': 390, 'height': 844})
+        page.screenshot(path=str(screenshot_dir / 'customer-jobs-mobile.png'), full_page=False)
+        page.set_viewport_size({'width': 1600, 'height': 900})
         assert not page.get_by_label('Source').count()
         for filter_label in ('Niche', 'Date', 'Work type', 'Minimum salary', 'Salary currency', 'Salary period', 'Match priority', 'Sort jobs'):
             assert not page.get_by_label(filter_label, exact=True).count(), filter_label

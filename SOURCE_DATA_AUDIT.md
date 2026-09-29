@@ -20,4 +20,5 @@ The archive had **1,882 unique event keys** at the snapshot. All 1,882 have a de
 
 The source probe checks available public listings, not every page or every job on a site. Sites can delay publication or rate limit requests. PeoplePerHour, Contra, and Guru are not reliable account-free live sources in the present environment; the owner status page shows those failures. No challenge bypass or credential reuse is attempted.
 
-Times are shown in Philippine time. **Posted** uses an exact source clock time only when provided; otherwise the original source phrase or **Not provided** appears. **Detected** is the watcher's own timestamp. The two values are kept separate.
+Times are shown in Philippine time. **Job posted** uses an exact source clock time only when provided; a date-only source phrase may appear without a clock time. **Found** is the watcher's own first-detection timestamp. The two values are kept separate.
+The live job view now updates verified posting ages every 30 seconds and shows the exact PHT time underneath. Relative source labels without a timestamp are shown as **Posting time unverified**, because an archived label such as “1 minute ago” becomes stale. **Found** continues to show the watcher's first-detection age and exact time.

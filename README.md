@@ -59,6 +59,8 @@ For local membership smoke checks, run `node scripts/smoke-membership.mjs` from 
 
 The watcher mirrors the 5,000-job rolling archive to the private Supabase `jobs` table. The frontend reads those records through authorized server routes and uses a server-side Realtime subscription for new inserts, with 30-second refresh as recovery. The watcher must stay running for new jobs to arrive. Source sites publish at their own pace; a 20-second scan loop does not make their posting feeds update every 20 seconds. See [launch audit](LAUNCH_AUDIT.md) and [source data audit](SOURCE_DATA_AUDIT.md) for verified coverage and limitations.
 
+Both customer and owner job views show **Job posted** as a live relative age plus the exact Philippine time when the source supplied a verified timestamp. **Found** is the watcher's separate first-detection time. A source that supplies only a relative label, with no verifiable timestamp, displays **Posting time unverified** so an old archived job cannot keep saying “1 minute ago.”
+
 The bot watches OLJ and additional job sources and sends Telegram alerts for new matches.
 
 ## What This Bot Does

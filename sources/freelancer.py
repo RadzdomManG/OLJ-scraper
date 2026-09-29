@@ -17,7 +17,7 @@ def fetch(http, urls=SEARCH_URLS, timeout=12):
             time.sleep(random.uniform(0.4, 1.0))
         response = http.get(url, timeout=timeout)
         response.raise_for_status()
-        soup = BeautifulSoup(response.text, "lxml")
+        soup = BeautifulSoup(response.content, "lxml")
         cards = soup.select("div.JobSearchCard-item")
         if not cards:
             raise ValueError(f"Freelancer listing layout changed: {url}")
@@ -46,7 +46,7 @@ def fetch_detail(http, url, timeout=12):
     """Use the public project page; listing 'average bid' is not the budget."""
     response = http.get(url, timeout=timeout)
     response.raise_for_status()
-    soup = BeautifulSoup(response.text, 'lxml')
+    soup = BeautifulSoup(response.content, 'lxml')
     heading = soup.select_one('div.Project-heading-title')
     if not heading:
         raise ValueError('Freelancer project detail layout changed')

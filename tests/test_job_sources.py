@@ -8,6 +8,7 @@ from sources.wellfound import parse_job_posting
 class Response:
     def __init__(self, text="", payload=None):
         self.text = text
+        self.content = text.encode('utf-8')
         self.payload = payload
 
     def raise_for_status(self):

@@ -25,6 +25,21 @@ def normalized(value):
     return ' ' + re.sub(r'\s+', ' ', re.sub(r'[^a-z0-9]+', ' ', str(value or '').lower())).strip() + ' '
 
 
+def readable_text(value):
+    """Repair UTF-8 punctuation decoded as Latin-1/Windows-1252 by a source."""
+    raw = str(value or '')
+    if not any(marker in raw for marker in ('â', 'Ã', 'Â')):
+        return raw
+    for encoding in ('latin1', 'cp1252'):
+        try:
+            fixed = raw.encode(encoding).decode('utf-8')
+        except (UnicodeError, LookupError):
+            continue
+        if '�' not in fixed:
+            return fixed
+    return raw
+
+
 def matching_aliases(text, aliases):
     return [alias for alias in aliases if normalized(alias) in text]
 
@@ -85,11 +100,11 @@ def source_posted(value, source):
 
 
 def salary_parts(raw):
-    value = str(raw or '').strip()
+    value = readable_text(raw).strip()
     if not value:
         return {'salary_raw': None, 'salary_min': None, 'salary_max': None, 'salary_currency': None, 'salary_period': None}
     currency_match = re.search(r'\b(USD|PHP|GBP|EUR|AUD|CAD|NZD|INR|SGD)\b', value, re.I)
-    currency = currency_match.group(1).upper() if currency_match else 'PHP' if '₱' in value or 'â‚±' in value else 'USD' if '$' in value else 'GBP' if '£' in value else 'EUR' if '€' in value else None
+    currency = currency_match.group(1).upper() if currency_match else 'PHP' if '₱' in value else 'USD' if '$' in value else 'GBP' if '£' in value else 'EUR' if '€' in value else 'INR' if '₹' in value else None
     amounts = [float(x.replace(',', '')) for x in re.findall(r'(?<![\w])\d[\d,]*(?:\.\d+)?', value)[:2]]
     period = next((period for pattern, period in [
         (r'\b(hour|hourly|hr)\b', 'hour'), (r'\b(day|daily)\b', 'day'),
@@ -121,9 +136,9 @@ def normalize_event(event):
     salary = salary_parts(event.get('wage_salary'))
     return {
         'event_key': event['event_key'], 'source': source, 'source_job_id': str(event.get('job_id') or ''),
-        'source_url': event.get('url') or None, 'title': event.get('title') or '',
-        'company': event.get('company') or None, 'description': event.get('description') or None,
-        'skills': event.get('skills') or [], 'location': event.get('location') or None,
+        'source_url': event.get('url') or None, 'title': readable_text(event.get('title')),
+        'company': readable_text(event.get('company')) or None, 'description': readable_text(event.get('description')) or None,
+        'skills': [readable_text(skill) for skill in (event.get('skills') or [])], 'location': readable_text(event.get('location')) or None,
         'category': event.get('category') or None, 'tags': event.get('tags') or [],
         'source_posted_raw': posted_raw,
         'source_posted_at': source_posted(event.get('posted_at_iso') or posted_raw, source),

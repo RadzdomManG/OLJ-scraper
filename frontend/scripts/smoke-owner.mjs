@@ -32,6 +32,9 @@ try {
   check(cookie.startsWith('aurelius_owner='), 'owner cookie issued');
   check(/Max-Age=34560000/i.test(login.response.headers.get('set-cookie') || ''), 'owner cookie persists across visits');
   check((await request('/api/auth/session', {}, cookie)).response.status === 200, 'owner session renews');
+  const ownerJobs = await request('/api/jobs', {}, cookie);
+  check(ownerJobs.response.status === 200 && ownerJobs.data.jobs?.length > 0, 'owner loads jobs');
+  check(Object.hasOwn(ownerJobs.data.jobs[0], 'source_posted_at') && !!ownerJobs.data.jobs[0].first_seen_at, 'owner receives posted and detected timestamps');
   const add = await request('/api/admin/codes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label: 'Owner route smoke test', expires_at: new Date(Date.now() + 3600_000).toISOString(), max_uses: 2 }) }, cookie);
   check(add.response.status === 200 && !!add.data.code, 'owner creates membership with expiration');
   codeId = add.data.id;
