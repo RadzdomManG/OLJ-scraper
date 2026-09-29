@@ -12,8 +12,9 @@ Copy-Item .env.example .env
 python watcher.py
 ```
 
-The watcher scans OLJ every 20 seconds and schedules each additional source at
-its own interval. It runs continuously while the terminal and computer remain on.
+The watcher schedules OLJ with a 20-second minimum interval and each additional
+source at its own interval. A slow source can extend the actual time between
+checks. It runs continuously while the terminal and computer remain on.
 For unattended use, create a Windows Task Scheduler task:
 
 1. Trigger: **At log on** for your Windows account.
@@ -33,11 +34,16 @@ when restarted, so a stable named tunnel or hosted backend is needed for reliabl
 | Source | Method | Default check interval | Current limit |
 | --- | --- | --- | --- |
 | OLJ | Public listing and detail pages | 20 seconds | Existing watcher behavior |
-| Freelancer | Public all-jobs listing page | 2 minutes | Listing exposes about 50 recent cards; cards omit exact posting time and client budget |
+| Freelancer | Public all-jobs listing page | 1 minute | Listing exposes about 50 recent cards; cards omit exact posting time and client budget |
 | Wellfound | Public page with Playwright and JobPosting data | 5 minutes | Public landing page covers a limited set of recent listings |
 | Remotive | [Official public category RSS feeds](https://remotive.com/remote-jobs/rss-feed) | 30 minutes | Feed coverage depends on Remotive's public category feeds |
 | PeoplePerHour | Playwright public page probe | 30 minutes | Bot challenge; currently blocked |
 | Contra | Playwright public page probe | 30 minutes | Job feed redirects to login; currently blocked |
+| We Work Remotely | [Official all-jobs RSS](https://weworkremotely.com/remote-job-rss-feed) | 1 minute | Feed publication timing is controlled by the site |
+| Guru | Public newest projects page | 1 minute | Public page exposes only its first 20 projects |
+| Jobicy | [Official RSS](https://jobicy.com/jobs-rss-feed) | 1 hour | Feed rules prohibit polling more than once per hour |
+| Himalayas | [Official RSS](https://himalayas.app/docs/remote-jobs-rss) | 24 hours | Public feed updates daily and exposes recent listings only |
+| VirtualStaff.ph | Public browser-rendered jobs page | 1 minute | Public page exposes a limited set of job cards |
 
 Blocked sources are reported in **Backend Status** and do not fabricate jobs or
 attempt captcha solving or account login. Enable/disable a source and set its interval there.
@@ -58,6 +64,9 @@ and notification status. Owners can mark jobs **Saved**, **Applied**, or
 The owner **Keywords** page edits include and exclude terms for new alerts.
 Collection keeps every job visible on each accessible public listing page,
 including jobs outside your niche. Keywords control alerts, not collection.
+One-minute polling is a target for eligible sources, not a guarantee of seeing
+a post within one minute of its creation. Source publication delays and the
+watcher's sequential scan can add delay. The dashboard refreshes every 30 seconds.
 Only newly discovered matching jobs can notify. The first fetch from a newly
 enabled external source establishes a baseline without sending a backlog of
 alerts. Later new matching jobs send Telegram messages with source, title,

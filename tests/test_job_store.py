@@ -13,6 +13,8 @@ class JobStoreTest(unittest.TestCase):
             store.save_jobs([{"event_key": "freelancer:123", "site_type": "freelancer", "detected_at": "2026-09-29T00:00:00Z", "title": "AI Video Creator"}])
             store.add_seen({"freelancer:123"})
             store.set_source("freelancer", False, 180)
+            store.set_source_poll("jobicy", 1790658000.0)
+            store.set_source_health("jobicy", {"status": "ok", "last_fetched": 200})
             store.set_match_settings(["ComfyUI", "LoRA"], ["unpaid"])
             store.set_stage("freelancer:123", "saved")
 
@@ -20,6 +22,8 @@ class JobStoreTest(unittest.TestCase):
             self.assertEqual(reopened.load_jobs()[0]["title"], "AI Video Creator")
             self.assertIn("freelancer:123", reopened.load_seen())
             self.assertFalse(reopened.source_settings([("freelancer", True, 120)])["freelancer"]["enabled"])
+            self.assertEqual(reopened.source_polls()["jobicy"], 1790658000.0)
+            self.assertEqual(reopened.source_health()["jobicy"]["last_fetched"], 200)
             self.assertEqual(reopened.match_settings()["exclude_keywords"], ["unpaid"])
             self.assertEqual(reopened.stages()["freelancer:123"], "saved")
 

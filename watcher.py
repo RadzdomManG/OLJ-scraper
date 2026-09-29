@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 import hmac
-from sources import contra, freelancer, peopleperhour, remotive, wellfound
+from sources import contra, freelancer, guru, himalayas, jobicy, peopleperhour, remotive, virtualstaff, wellfound, weworkremotely
 from sources.common import SourceBlocked, with_retries
 from job_store import JobStore
 
@@ -105,6 +105,11 @@ INCLUDE_REMOTIVE = env_flag("INCLUDE_REMOTIVE", True)
 INCLUDE_WELLFOUND = env_flag("INCLUDE_WELLFOUND", True)
 INCLUDE_PEOPLEPERHOUR = env_flag("INCLUDE_PEOPLEPERHOUR", True)
 INCLUDE_CONTRA = env_flag("INCLUDE_CONTRA", True)
+INCLUDE_WEWORKREMOTELY = env_flag("INCLUDE_WEWORKREMOTELY", True)
+INCLUDE_GURU = env_flag("INCLUDE_GURU", True)
+INCLUDE_JOBICY = env_flag("INCLUDE_JOBICY", True)
+INCLUDE_HIMALAYAS = env_flag("INCLUDE_HIMALAYAS", True)
+INCLUDE_VIRTUALSTAFF = env_flag("INCLUDE_VIRTUALSTAFF", True)
 LISTINGS_REQUIRE_KEYWORD_MATCH = env_flag("LISTINGS_REQUIRE_KEYWORD_MATCH", False)
 STORE_ALL_FETCHED_JOBS = env_flag("STORE_ALL_FETCHED_JOBS", True)
 
@@ -120,7 +125,7 @@ JOB_SITES = [
 
 JOB_SITES.extend([
     {"name": "Freelancer", "url": freelancer.SEARCH_URLS[0], "urls": freelancer.SEARCH_URLS,
-     "type": "freelancer", "poll_interval_seconds": 120, "enabled_default": INCLUDE_FREELANCER},
+     "type": "freelancer", "poll_interval_seconds": 60, "enabled_default": INCLUDE_FREELANCER},
     {"name": "Wellfound", "url": wellfound.LIST_URL,
      "type": "wellfound", "poll_interval_seconds": 300, "enabled_default": INCLUDE_WELLFOUND},
     {"name": "Remotive", "url": remotive.FEED_INDEX_URL,
@@ -129,7 +134,23 @@ JOB_SITES.extend([
      "type": "peopleperhour", "poll_interval_seconds": 1800, "enabled_default": INCLUDE_PEOPLEPERHOUR},
     {"name": "Contra", "url": contra.LIST_URL,
      "type": "contra", "poll_interval_seconds": 1800, "enabled_default": INCLUDE_CONTRA},
+    {"name": "We Work Remotely", "url": weworkremotely.FEED_URL,
+     "type": "weworkremotely", "poll_interval_seconds": 60, "enabled_default": INCLUDE_WEWORKREMOTELY},
+    {"name": "Guru", "url": guru.LIST_URL,
+     "type": "guru", "poll_interval_seconds": 60, "enabled_default": INCLUDE_GURU},
+    {"name": "Jobicy", "url": jobicy.FEED_URL,
+     "type": "jobicy", "poll_interval_seconds": 3600, "enabled_default": INCLUDE_JOBICY},
+    {"name": "Himalayas", "url": himalayas.FEED_URL,
+     "type": "himalayas", "poll_interval_seconds": 86400, "enabled_default": INCLUDE_HIMALAYAS},
+    {"name": "VirtualStaff.ph", "url": virtualstaff.LIST_URL,
+     "type": "virtualstaff", "poll_interval_seconds": 60, "enabled_default": INCLUDE_VIRTUALSTAFF},
 ])
+JOB_SITES.sort(key=lambda site: {
+    "onlinejobsph": 0, "freelancer": 1, "weworkremotely": 2,
+    "guru": 3, "virtualstaff": 4, "wellfound": 5,
+    "remotive": 6, "jobicy": 7, "himalayas": 8,
+    "peopleperhour": 9, "contra": 10,
+}.get(site["type"], 99))
 
 # Fixed scan cycle per product requirement.
 CHECK_INTERVAL_SECONDS = 20
@@ -1921,6 +1942,16 @@ def fetch_jobs(site):
         return peopleperhour.fetch()
     if site["type"] == "contra":
         return contra.fetch()
+    if site["type"] == "weworkremotely":
+        return with_retries(lambda: weworkremotely.fetch(session, site["url"], timeout=TIMEOUT))
+    if site["type"] == "guru":
+        return with_retries(lambda: guru.fetch(session, site["url"], timeout=TIMEOUT))
+    if site["type"] == "jobicy":
+        return with_retries(lambda: jobicy.fetch(session, site["url"], timeout=TIMEOUT))
+    if site["type"] == "himalayas":
+        return with_retries(lambda: himalayas.fetch(session, site["url"], timeout=TIMEOUT))
+    if site["type"] == "virtualstaff":
+        return with_retries(virtualstaff.fetch)
     jobs = {}
     html = request_text(site["url"], site["name"])
     if not html:
@@ -2074,7 +2105,7 @@ def build_event(site, job_id, job, age_seconds=None, posted_at_iso="", seen_key=
         "url": job.get("url", "").strip(),
         "description": job.get("description", "").strip(),
         "posted_at": job.get("posted_at", "").strip(),
-        "posted_at_iso": posted_at_iso or (job.get("posted_at", "") if site["type"] in {"remotive", "wellfound"} else ""),
+        "posted_at_iso": posted_at_iso or (job.get("posted_at", "") if site["type"] in {"remotive", "wellfound", "weworkremotely", "jobicy", "himalayas"} else ""),
         "detected_at": detected_at,
         "detected_at_local": format_local_time(detected_at, DASHBOARD_TZ),
         "last_seen_at": detected_at,
@@ -2213,6 +2244,7 @@ def run_check_cycle():
             continue
         with state_lock:
             state["source_last_poll"][site["type"]] = site_started_ts
+        JOB_STORE.set_source_poll(site["type"], site_started_ts)
         add_runtime_log(f"Cycle stage: fetching jobs for {site['name']}", "info")
 
         try:
@@ -2220,13 +2252,17 @@ def run_check_cycle():
         except Exception as exc:
             site_summary["errors"] += 1
             add_runtime_log(f"Site fetch error ({site['name']}): {type(exc).__name__}: {exc}", "error")
+            health = {"last_checked_at": now_utc_iso(), "last_error": f"{type(exc).__name__}: {exc}", "last_fetched": 0, "status": "blocked" if isinstance(exc, SourceBlocked) else "error"}
             with state_lock:
-                state.setdefault("source_health", {})[site["type"]] = {"last_checked_at": now_utc_iso(), "last_error": f"{type(exc).__name__}: {exc}", "last_fetched": 0, "status": "blocked" if isinstance(exc, SourceBlocked) else "error"}
+                state.setdefault("source_health", {})[site["type"]] = health
+            JOB_STORE.set_source_health(site["type"], health)
             cycle_summary["sites"].append(site_summary)
             continue
         site_summary["fetched"] = len(jobs)
+        health = {"last_checked_at": now_utc_iso(), "last_error": "", "last_fetched": len(jobs), "status": "ok"}
         with state_lock:
-            state.setdefault("source_health", {})[site["type"]] = {"last_checked_at": now_utc_iso(), "last_error": "", "last_fetched": len(jobs), "status": "ok"}
+            state.setdefault("source_health", {})[site["type"]] = health
+        JOB_STORE.set_source_health(site["type"], health)
         if len(jobs) == 0:
             add_runtime_log(f"No jobs returned for {site['name']} (after listing filter).", "warn")
         add_runtime_log(f"Cycle stage: fetched {len(jobs)} jobs for {site['name']}", "info")
@@ -2654,12 +2690,13 @@ def watcher_loop(stop_event):
                 state["manual_scan_requested"] = False
 
             trigger = "manual" if manual_requested else "auto"
+            cycle_started_ts = time.time()
             execute_scan_cycle(trigger_label=trigger)
 
             interval_seconds = get_runtime_scan_interval_seconds()
             with state_lock:
                 if state.get("watcher_running") and not state.get("auto_scan_paused"):
-                    state["next_check_due_ts"] = time.time() + interval_seconds
+                    state["next_check_due_ts"] = max(time.time(), cycle_started_ts + interval_seconds)
                 else:
                     state["next_check_due_ts"] = 0.0
             continue
@@ -2807,8 +2844,8 @@ def initialize_state():
         state["auto_scan_paused"] = False
         state["manual_scan_requested"] = False
         state["scan_in_progress"] = False
-        state["source_last_poll"] = {}
-        state["source_health"] = {}
+        state["source_last_poll"] = JOB_STORE.source_polls()
+        state["source_health"] = JOB_STORE.source_health()
         state["source_settings"] = JOB_STORE.source_settings([
             (site["type"], site.get("enabled_default", True), site.get("poll_interval_seconds", CHECK_INTERVAL_SECONDS))
             for site in JOB_SITES
@@ -3019,7 +3056,7 @@ def api_update_source(source_type):
     body = request.get_json(silent=True) or {}
     if not isinstance(body.get("enabled"), bool):
         return jsonify({"error": "enabled must be true or false"}), 400
-    minimums = {"onlinejobsph": 20, "freelancer": 60, "wellfound": 120, "remotive": 1800, "peopleperhour": 1800, "contra": 1800}
+    minimums = {"onlinejobsph": 20, "freelancer": 60, "wellfound": 120, "remotive": 1800, "peopleperhour": 1800, "contra": 1800, "weworkremotely": 60, "guru": 60, "jobicy": 3600, "himalayas": 86400, "virtualstaff": 60}
     try:
         interval = int(body.get("interval_seconds", site.get("poll_interval_seconds", CHECK_INTERVAL_SECONDS)))
     except (ValueError, TypeError):
@@ -3029,7 +3066,7 @@ def api_update_source(source_type):
     JOB_STORE.set_source(source_type, body["enabled"], interval)
     with state_lock:
         state.setdefault("source_settings", {})[source_type] = {"enabled": body["enabled"], "interval_seconds": interval}
-        if body["enabled"]:
+        if body["enabled"] and source_type not in {"jobicy", "himalayas"}:
             state.setdefault("source_last_poll", {})[source_type] = 0
     scan_wakeup_event.set()
     return jsonify({"ok": True, "source": source_type, "enabled": body["enabled"], "interval_seconds": interval})

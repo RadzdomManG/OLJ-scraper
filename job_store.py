@@ -39,6 +39,14 @@ class JobStore:
                     stage TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS source_polls (
+                    source TEXT PRIMARY KEY,
+                    checked_at REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS source_health (
+                    source TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL
+                );
             """)
 
     @contextmanager
@@ -84,12 +92,38 @@ class JobStore:
                 db.execute("INSERT OR IGNORE INTO source_settings VALUES (?, ?, ?)", (source, int(enabled), int(interval)))
                 if source == "remotive" and interval == 1800:
                     db.execute("UPDATE source_settings SET interval_seconds = 1800 WHERE source = 'remotive' AND interval_seconds = 21600")
+                if source == "freelancer" and interval == 60:
+                    db.execute("UPDATE source_settings SET interval_seconds = 60 WHERE source = 'freelancer' AND interval_seconds = 120")
             rows = db.execute("SELECT source, enabled, interval_seconds FROM source_settings").fetchall()
         return {source: {"enabled": bool(enabled), "interval_seconds": interval} for source, enabled, interval in rows}
 
     def set_source(self, source, enabled, interval_seconds):
         with self.connect() as db:
             db.execute("INSERT INTO source_settings VALUES (?, ?, ?) ON CONFLICT(source) DO UPDATE SET enabled=excluded.enabled, interval_seconds=excluded.interval_seconds", (source, int(enabled), int(interval_seconds)))
+
+    def source_polls(self):
+        with self.connect() as db:
+            return {source: checked_at for source, checked_at in db.execute("SELECT source, checked_at FROM source_polls")}
+
+    def set_source_poll(self, source, checked_at):
+        with self.connect() as db:
+            db.execute(
+                "INSERT INTO source_polls (source, checked_at) VALUES (?, ?) "
+                "ON CONFLICT(source) DO UPDATE SET checked_at=excluded.checked_at",
+                (source, checked_at),
+            )
+
+    def source_health(self):
+        with self.connect() as db:
+            return {source: json.loads(payload) for source, payload in db.execute("SELECT source, payload FROM source_health")}
+
+    def set_source_health(self, source, health):
+        with self.connect() as db:
+            db.execute(
+                "INSERT INTO source_health (source, payload) VALUES (?, ?) "
+                "ON CONFLICT(source) DO UPDATE SET payload=excluded.payload",
+                (source, json.dumps(health, ensure_ascii=False)),
+            )
 
     def match_settings(self):
         with self.connect() as db:
