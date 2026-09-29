@@ -15,9 +15,15 @@ from zoneinfo import ZoneInfo
 
 import requests
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 import hmac
+from sources import contra, freelancer, peopleperhour, remotive, wellfound
+from sources.common import SourceBlocked, with_retries
+from job_store import JobStore
+
+load_dotenv()
 
 
 # ======================
@@ -63,6 +69,17 @@ def csv_words(value):
     return deduped
 
 
+def matched_job_keywords(job, settings):
+    text = normalize_match_text(" ".join([
+        str(job.get("title", "")), str(job.get("description", "")),
+        " ".join(job.get("skills", []) if isinstance(job.get("skills"), list) else []),
+    ]))
+    haystack = f" {text} "
+    if any(f" {normalize_match_text(word)} " in haystack for word in settings.get("exclude_keywords", [])):
+        return []
+    return [word for word in settings.get("include_keywords", []) if f" {normalize_match_text(word)} " in haystack]
+
+
 def safe_timezone(name, default="UTC"):
     try:
         return ZoneInfo(name)
@@ -83,7 +100,11 @@ def safe_timezone(name, default="UTC"):
 ONLINEJOBSPH_SEARCH_URL = os.environ.get(
     "ONLINEJOBSPH_SEARCH_URL", "https://www.onlinejobs.ph/jobseekers/jobsearch"
 ).strip()
-INCLUDE_FREELANCER = env_flag("INCLUDE_FREELANCER", False)
+INCLUDE_FREELANCER = env_flag("INCLUDE_FREELANCER", True)
+INCLUDE_REMOTIVE = env_flag("INCLUDE_REMOTIVE", True)
+INCLUDE_WELLFOUND = env_flag("INCLUDE_WELLFOUND", True)
+INCLUDE_PEOPLEPERHOUR = env_flag("INCLUDE_PEOPLEPERHOUR", True)
+INCLUDE_CONTRA = env_flag("INCLUDE_CONTRA", True)
 LISTINGS_REQUIRE_KEYWORD_MATCH = env_flag("LISTINGS_REQUIRE_KEYWORD_MATCH", False)
 STORE_ALL_FETCHED_JOBS = env_flag("STORE_ALL_FETCHED_JOBS", True)
 
@@ -92,19 +113,23 @@ JOB_SITES = [
         "name": "OnlineJobsPH",
         "url": ONLINEJOBSPH_SEARCH_URL,
         "type": "onlinejobsph",
+        "enabled_default": True,
         "require_keyword_match": LISTINGS_REQUIRE_KEYWORD_MATCH,
     },
 ]
 
-if INCLUDE_FREELANCER:
-    JOB_SITES.append(
-        {
-            "name": "Freelancer",
-            "url": os.environ.get("FREELANCER_SEARCH_URL", "https://www.freelancer.ph/jobs").strip(),
-            "type": "freelancer",
-            "require_keyword_match": LISTINGS_REQUIRE_KEYWORD_MATCH,
-        }
-    )
+JOB_SITES.extend([
+    {"name": "Freelancer", "url": freelancer.SEARCH_URLS[0], "urls": freelancer.SEARCH_URLS,
+     "type": "freelancer", "poll_interval_seconds": 120, "enabled_default": INCLUDE_FREELANCER},
+    {"name": "Wellfound", "url": wellfound.LIST_URL,
+     "type": "wellfound", "poll_interval_seconds": 300, "enabled_default": INCLUDE_WELLFOUND},
+    {"name": "Remotive", "url": remotive.API_URL,
+     "type": "remotive", "poll_interval_seconds": 21600, "enabled_default": INCLUDE_REMOTIVE},
+    {"name": "PeoplePerHour", "url": peopleperhour.LIST_URL,
+     "type": "peopleperhour", "poll_interval_seconds": 1800, "enabled_default": INCLUDE_PEOPLEPERHOUR},
+    {"name": "Contra", "url": contra.LIST_URL,
+     "type": "contra", "poll_interval_seconds": 1800, "enabled_default": INCLUDE_CONTRA},
+])
 
 # Fixed scan cycle per product requirement.
 CHECK_INTERVAL_SECONDS = 20
@@ -117,6 +142,7 @@ MAX_DETAIL_FETCH_PER_CYCLE = env_int("MAX_DETAIL_FETCH_PER_CYCLE", 5)
 MAX_LOG_LINES = max(80, env_int("MAX_LOG_LINES", 600))
 
 DATA_DIR = os.environ.get("DATA_DIR", "data")
+JOB_STORE = JobStore(os.path.join(DATA_DIR, "jobs.sqlite3"))
 SEEN_FILE = os.path.join(DATA_DIR, "seen_jobs.json")
 EVENTS_FILE = os.path.join(DATA_DIR, "job_events.json")
 TELEGRAM_SETTINGS_FILE = os.path.join(DATA_DIR, "telegram_settings.json")
@@ -415,6 +441,10 @@ def event_age_minutes(event):
     if posted_dt:
         age_seconds = (now_dt - posted_dt).total_seconds()
         return max(0, int(age_seconds // 60))
+
+    # Detection is not the posting time for sources whose listing has no date.
+    if event.get("site_type") and event.get("site_type") != "onlinejobsph":
+        return None
 
     # Fallback to detected timestamp when posted time is unavailable.
     detected_iso = (event.get("detected_at") or "").strip()
@@ -824,6 +854,9 @@ def normalize_legacy_seen_item(value):
 
 
 def load_seen_jobs():
+    stored = JOB_STORE.load_seen()
+    if stored:
+        return stored
     raw = load_json_file(SEEN_FILE, [])
 
     if isinstance(raw, list):
@@ -847,6 +880,7 @@ def load_seen_jobs():
 
 
 def save_seen_jobs(seen):
+    JOB_STORE.add_seen(seen)
     save_json_file(SEEN_FILE, sorted(seen))
 
 
@@ -865,6 +899,7 @@ def normalize_event(item):
     base = {
         "event_key": event_key,
         "site": str(item.get("site", "")).strip(),
+        "source": str(item.get("source", item.get("site", ""))).strip(),
         "site_type": site_type,
         "job_id": job_id,
         "title": str(item.get("title", "")).strip(),
@@ -892,6 +927,18 @@ def normalize_event(item):
         "employer_quality_score": item.get("employer_quality_score", None),
         "reply_opportunity": str(item.get("reply_opportunity", "")).strip(),
         "reply_signals": item.get("reply_signals", []) if isinstance(item.get("reply_signals", []), list) else [],
+        "company": str(item.get("company", "")).strip(),
+        "skills": item.get("skills", []) if isinstance(item.get("skills", []), list) else [],
+        "location": str(item.get("location", "")).strip(),
+        "remote": item.get("remote", None),
+        "company_client": str(item.get("company_client", item.get("company", ""))).strip(),
+        "budget_salary": str(item.get("budget_salary", item.get("wage_salary", ""))).strip(),
+        "job_type": str(item.get("job_type", item.get("type_of_work", ""))).strip(),
+        "skills_tags": item.get("skills_tags", item.get("skills", [])) if isinstance(item.get("skills_tags", item.get("skills", [])), list) else [],
+        "location_remote": str(item.get("location_remote", item.get("location", ""))).strip(),
+        "original_link": str(item.get("original_link", item.get("url", ""))).strip(),
+        "matched_keywords": item.get("matched_keywords", []) if isinstance(item.get("matched_keywords", []), list) else [],
+        "scraped_at": str(item.get("scraped_at", item.get("detected_at", ""))).strip(),
     }
     if "keyword_matched" not in item:
         base["keyword_matched"] = event_matches_niche_keywords(base)
@@ -899,7 +946,9 @@ def normalize_event(item):
 
 
 def load_job_events():
-    raw = load_json_file(EVENTS_FILE, [])
+    raw = JOB_STORE.load_jobs()
+    if not raw:
+        raw = load_json_file(EVENTS_FILE, [])
     if not isinstance(raw, list):
         return [], set()
 
@@ -914,10 +963,14 @@ def load_job_events():
         keys.add(event["event_key"])
         events.append(event)
 
-    return retain_newest_events(events)
+    kept, kept_keys = retain_newest_events(events)
+    if not JOB_STORE.load_jobs() and kept:
+        JOB_STORE.save_jobs(kept)
+    return kept, kept_keys
 
 
 def save_job_events(events):
+    JOB_STORE.save_jobs(events)
     save_json_file(EVENTS_FILE, events)
 
 
@@ -1805,6 +1858,8 @@ def merge_source_details(target, detail):
         if new_value and new_value != target.get(key, ""):
             target[key] = new_value
             changed = True
+    target["budget_salary"] = target.get("wage_salary", "")
+    target["job_type"] = target.get("type_of_work", "")
     return changed
 
 
@@ -1856,6 +1911,16 @@ def parse_onlinejobs_cards(soup):
 
 
 def fetch_jobs(site):
+    if site["type"] == "freelancer":
+        return with_retries(lambda: freelancer.fetch(session, site["urls"], timeout=TIMEOUT))
+    if site["type"] == "remotive":
+        return with_retries(lambda: remotive.fetch(session, site["url"], timeout=TIMEOUT))
+    if site["type"] == "wellfound":
+        return with_retries(wellfound.fetch)
+    if site["type"] == "peopleperhour":
+        return peopleperhour.fetch()
+    if site["type"] == "contra":
+        return contra.fetch()
     jobs = {}
     html = request_text(site["url"], site["name"])
     if not html:
@@ -1907,32 +1972,6 @@ def fetch_jobs(site):
             if keyword_match(combined_text, words=filter_words, match_if_empty=True):
                 jobs[job_id] = job
 
-    elif site["type"] == "freelancer":
-        for job_card in soup.select("div.JobSearchCard-item"):
-            a = job_card.select_one("a[data-item='job-title-link']")
-            if not a:
-                continue
-
-            href = a.get("href", "").strip()
-            job_id = extract_freelancer_job_id(href)
-            if not job_id:
-                continue
-
-            title = a.get_text(strip=True)
-            url_full = urljoin(FREELANCER_BASE_URL, href)
-
-            desc_tag = job_card.select_one("p.JobSearchCard-description")
-            description = desc_tag.get_text(" ", strip=True) if desc_tag else ""
-
-            combined_text = f"{title} {description}"
-            if not require_keyword_match or keyword_match(combined_text, words=filter_words, match_if_empty=True):
-                jobs[job_id] = {
-                    "title": f"[Freelancer] {title}",
-                    "url": url_full,
-                    "description": description,
-                    "posted_at": "",
-                }
-
     return jobs
 
 
@@ -1960,6 +1999,8 @@ def startup_backfill_listed_jobs():
     detail_fetch_count = 0
 
     for site in JOB_SITES:
+        if site["type"] != "onlinejobsph":
+            continue
         try:
             jobs = fetch_jobs(site)
         except Exception as exc:
@@ -1967,9 +2008,6 @@ def startup_backfill_listed_jobs():
             continue
 
         for job_id, job in jobs.items():
-            if site["type"] != "onlinejobsph":
-                continue
-
             age_seconds, posted_at_iso = onlinejobs_posting_info(job)
 
             seen_key = build_seen_key_for_job(site["type"], job_id, job)
@@ -2023,18 +2061,20 @@ def startup_backfill_listed_jobs():
 
 
 def build_event(site, job_id, job, age_seconds=None, posted_at_iso="", seen_key=""):
+    """Normalize every source into one persisted job record."""
     detected_at = now_utc_iso()
     event_key = str(seen_key or build_seen_key_for_job(site["type"], job_id, job))
     event = {
         "event_key": event_key,
         "site": site["name"],
+        "source": site["name"],
         "site_type": site["type"],
         "job_id": str(job_id),
         "title": job.get("title", "").strip(),
         "url": job.get("url", "").strip(),
         "description": job.get("description", "").strip(),
         "posted_at": job.get("posted_at", "").strip(),
-        "posted_at_iso": posted_at_iso,
+        "posted_at_iso": posted_at_iso or (job.get("posted_at", "") if site["type"] in {"remotive", "wellfound"} else ""),
         "detected_at": detected_at,
         "detected_at_local": format_local_time(detected_at, DASHBOARD_TZ),
         "last_seen_at": detected_at,
@@ -2047,7 +2087,21 @@ def build_event(site, job_id, job, age_seconds=None, posted_at_iso="", seen_key=
         "keyword_matched": False,
         "notification_sent": False,
         "repost_suspected": False,
+        "company": str(job.get("company", "")).strip(),
+        "skills": job.get("skills", []) if isinstance(job.get("skills", []), list) else [],
+        "location": str(job.get("location", "")).strip(),
+        "remote": job.get("remote", None),
+        "company_client": str(job.get("company", "")).strip(),
+        "budget_salary": job.get("wage_salary", "").strip(),
+        "job_type": job.get("type_of_work", "").strip(),
+        "skills_tags": job.get("skills", []) if isinstance(job.get("skills", []), list) else [],
+        "location_remote": str(job.get("location", "")).strip(),
+        "original_link": job.get("url", "").strip(),
+        "scraped_at": detected_at,
     }
+    with state_lock:
+        match_settings = dict(state.get("match_settings") or JOB_STORE.match_settings())
+    event["matched_keywords"] = matched_job_keywords(event, match_settings)
     event["keyword_matched"] = event_matches_niche_keywords(event)
     intelligence = score_event(event)
     event["job_score"] = intelligence["score"]
@@ -2084,24 +2138,16 @@ def notify_new_event(event, site):
     raw_title = (event.get("title") or "").strip() or "N/A"
     title_no_prefix = re.sub(r"^\[(onlinejobsph|freelancer)\]\s*", "", raw_title, flags=re.IGNORECASE).strip()
     posted_time = format_onlinejobs_posted_display(event)
-    type_of_work = (event.get("type_of_work") or "").strip() or "N/A"
     wage_salary = (event.get("wage_salary") or "").strip() or "N/A"
-    hours_per_week = (event.get("hours_per_week") or "").strip() or "N/A"
-    date_updated = (event.get("date_updated") or "").strip() or "N/A"
-    detected_at_local = (event.get("detected_at_local") or "").strip() or "N/A"
     url = (event.get("url") or "").strip() or "N/A"
 
     lines = [
-        f"Title: [{site['name']}] {title_no_prefix}",
-        "",
-        f"Employer Quality: {event.get('employer_quality_score', 'N/A')}/100",
+        f"Source: {site['name']}",
+        f"Title: {title_no_prefix}",
+        f"Summary: {truncate_text(snippet, 350)}",
         f"Wage/Salary: {wage_salary}",
-        f"Hours/Week: {hours_per_week}",
-        "",
-        f"Description: {snippet}",
-        "",
         f"Date posted: {posted_time}",
-        f"Date detected: {detected_at_local} ({DASHBOARD_TIMEZONE})",
+        f"Matched: {', '.join(event.get('matched_keywords', [])) or 'None'}",
         f"Link: {url}",
     ]
     text = "\n".join(lines)
@@ -2143,7 +2189,6 @@ def run_check_cycle():
 
     for site in JOB_SITES:
         site_started_ts = time.time()
-        add_runtime_log(f"Cycle stage: fetching jobs for {site['name']}", "info")
         site_summary = {
             "site": site["name"],
             "fetched": 0,
@@ -2154,18 +2199,39 @@ def run_check_cycle():
             "errors": 0,
             "aborted_budget": False,
         }
+        with state_lock:
+            source_setting = dict(state.get("source_settings", {}).get(site["type"], {}))
+            last_poll = state.setdefault("source_last_poll", {}).get(site["type"], 0)
+        if not source_setting.get("enabled", site.get("enabled_default", True)):
+            site_summary["disabled"] = True
+            cycle_summary["sites"].append(site_summary)
+            continue
+        poll_interval = source_setting.get("interval_seconds", site.get("poll_interval_seconds", 0))
+        if poll_interval and site_started_ts - last_poll < poll_interval:
+            site_summary["skipped_interval"] = True
+            cycle_summary["sites"].append(site_summary)
+            continue
+        with state_lock:
+            state["source_last_poll"][site["type"]] = site_started_ts
+        add_runtime_log(f"Cycle stage: fetching jobs for {site['name']}", "info")
 
         try:
             jobs = fetch_jobs(site)
         except Exception as exc:
             site_summary["errors"] += 1
             add_runtime_log(f"Site fetch error ({site['name']}): {type(exc).__name__}: {exc}", "error")
+            with state_lock:
+                state.setdefault("source_health", {})[site["type"]] = {"last_checked_at": now_utc_iso(), "last_error": f"{type(exc).__name__}: {exc}", "last_fetched": 0, "status": "blocked" if isinstance(exc, SourceBlocked) else "error"}
             cycle_summary["sites"].append(site_summary)
             continue
         site_summary["fetched"] = len(jobs)
+        with state_lock:
+            state.setdefault("source_health", {})[site["type"]] = {"last_checked_at": now_utc_iso(), "last_error": "", "last_fetched": len(jobs), "status": "ok"}
         if len(jobs) == 0:
             add_runtime_log(f"No jobs returned for {site['name']} (after listing filter).", "warn")
         add_runtime_log(f"Cycle stage: fetched {len(jobs)} jobs for {site['name']}", "info")
+        with state_lock:
+            source_has_history = any(key.startswith(f"{site['type']}:") for key in state["seen"])
 
         for job_id, job in jobs.items():
             if time.time() - site_started_ts > SITE_FETCH_BUDGET_SECONDS:
@@ -2271,7 +2337,8 @@ def run_check_cycle():
                 recent_fps = state.setdefault("recent_fingerprints", {})
                 recent_fps[fp] = event.get("detected_at", now_utc_iso())
 
-            pending_notifications.append((event, site))
+            if event.get("matched_keywords") and (site["type"] == "onlinejobsph" or source_has_history):
+                pending_notifications.append((event, site))
             site_summary["new_events"] += 1
             cycle_summary["new_events"] += 1
 
@@ -2740,6 +2807,14 @@ def initialize_state():
         state["auto_scan_paused"] = False
         state["manual_scan_requested"] = False
         state["scan_in_progress"] = False
+        state["source_last_poll"] = {}
+        state["source_health"] = {}
+        state["source_settings"] = JOB_STORE.source_settings([
+            (site["type"], site.get("enabled_default", True), site.get("poll_interval_seconds", CHECK_INTERVAL_SECONDS))
+            for site in JOB_SITES
+        ])
+        state["match_settings"] = JOB_STORE.match_settings()
+        state["job_stages"] = JOB_STORE.stages()
         state["last_scan_started_at"] = ""
         state["last_scan_finished_at"] = ""
         state["last_scan_result"] = "idle"
@@ -2813,28 +2888,39 @@ def api_jobs():
     query = (request.args.get("q", "") or "").strip().lower()[:200]
     keyword = (request.args.get("keyword", "") or "").strip().lower()[:200]
     status_filter = (request.args.get("status", "") or "").strip().lower()[:40]
+    source_filter = (request.args.get("source", "") or "").strip().lower()[:40]
+    stage_filter = (request.args.get("stage", "") or "").strip().lower()[:20]
+    date_from = (request.args.get("date_from", "") or "").strip()[:10]
+    date_to = (request.args.get("date_to", "") or "").strip()[:10]
+    notified_filter = (request.args.get("notified", "") or "").strip().lower()[:10]
 
     with state_lock:
         jobs = list(state["events"])
+        stages = dict(state.get("job_stages", {}))
     stored_count = len(jobs)
-    if query or keyword or status_filter:
+    if query or keyword or status_filter or source_filter or stage_filter or date_from or date_to or notified_filter:
         jobs = [event for event in jobs if (
             (not query or query in " ".join(str(event.get(key, "")) for key in ("title", "description", "type_of_work", "wage_salary")).lower())
             and (not keyword or keyword in " ".join(str(event.get(key, "")) for key in ("title", "description", "type_of_work")).lower())
             and (not status_filter or status_filter == str(event.get("status") or event.get("priority") or "").lower())
+            and (not source_filter or source_filter == str(event.get("site_type", "")).lower())
+            and (not stage_filter or stage_filter == stages.get(event.get("event_key"), "new"))
+            and (not date_from or (str(event.get("posted_at_iso") or event.get("detected_at") or "")[:10] >= date_from))
+            and (not date_to or (str(event.get("posted_at_iso") or event.get("detected_at") or "")[:10] <= date_to))
+            and (not notified_filter or (notified_filter == "sent") == bool(event.get("notification_sent")))
         )]
     filtered_count = len(jobs)
 
     jobs.sort(
         key=lambda e: (
-            int((event_posted_datetime_utc(e).timestamp()) if event_posted_datetime_utc(e) else 0),
+            int((event_posted_datetime_utc(e).timestamp()) if event_posted_datetime_utc(e) else (parse_iso_to_utc(e.get("detected_at", "")).timestamp() if parse_iso_to_utc(e.get("detected_at", "")) else 0)),
             str(e.get("detected_at", "")),
         ),
         reverse=True,
     )
     jobs = jobs[offset:offset + limit]
 
-    payload_jobs = [enrich_event_for_ui(event, include_heavy=False) for event in jobs]
+    payload_jobs = [dict(enrich_event_for_ui(event, include_heavy=False), stage=stages.get(event.get("event_key"), "new")) for event in jobs]
 
     return jsonify({"jobs": payload_jobs, "count": len(payload_jobs), "total": stored_count, "filtered_count": filtered_count, "limit": limit, "offset": offset})
 
@@ -2907,11 +2993,86 @@ def api_status():
             "metrics": dict(state.get("metrics", {})),
             "workspace_name": WORKSPACE_NAME,
             "site_fetch_budget_seconds": SITE_FETCH_BUDGET_SECONDS,
+            "sources": [
+                {
+                    "name": site["name"],
+                    "type": site["type"],
+                    "url": site["url"],
+                    "enabled": state.get("source_settings", {}).get(site["type"], {}).get("enabled", True),
+                    "poll_interval_seconds": state.get("source_settings", {}).get(site["type"], {}).get("interval_seconds", site.get("poll_interval_seconds", interval_seconds)),
+                    **state.get("source_health", {}).get(site["type"], {}),
+                }
+                for site in JOB_SITES
+            ],
             "daily_progress": compute_daily_progress(goals, analytics, followups_sent),
             "interviews_count": len(state.get("interviews", [])),
             "rules_count": len(state.get("rules", [])),
         }
     return jsonify(snapshot)
+
+
+@app.post("/api/sources/<source_type>")
+def api_update_source(source_type):
+    site = next((item for item in JOB_SITES if item["type"] == source_type), None)
+    if not site:
+        return jsonify({"error": "Unknown source"}), 404
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body.get("enabled"), bool):
+        return jsonify({"error": "enabled must be true or false"}), 400
+    minimums = {"onlinejobsph": 20, "freelancer": 60, "wellfound": 120, "remotive": 21600, "peopleperhour": 1800, "contra": 1800}
+    try:
+        interval = int(body.get("interval_seconds", site.get("poll_interval_seconds", CHECK_INTERVAL_SECONDS)))
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid interval"}), 400
+    if not minimums[source_type] <= interval <= 86400:
+        return jsonify({"error": f"Interval must be {minimums[source_type]}–86400 seconds"}), 400
+    JOB_STORE.set_source(source_type, body["enabled"], interval)
+    with state_lock:
+        state.setdefault("source_settings", {})[source_type] = {"enabled": body["enabled"], "interval_seconds": interval}
+        if body["enabled"]:
+            state.setdefault("source_last_poll", {})[source_type] = 0
+    scan_wakeup_event.set()
+    return jsonify({"ok": True, "source": source_type, "enabled": body["enabled"], "interval_seconds": interval})
+
+
+@app.get("/api/match-settings")
+def api_get_match_settings():
+    with state_lock:
+        settings = dict(state.get("match_settings") or JOB_STORE.match_settings())
+    return jsonify(settings)
+
+
+@app.post("/api/match-settings")
+def api_set_match_settings():
+    body = request.get_json(silent=True) or {}
+    include = body.get("include_keywords")
+    exclude = body.get("exclude_keywords")
+    if not isinstance(include, list) or not isinstance(exclude, list):
+        return jsonify({"error": "Keywords must be lists"}), 400
+    include = list(dict.fromkeys(str(word).strip() for word in include if str(word).strip()))
+    exclude = list(dict.fromkeys(str(word).strip() for word in exclude if str(word).strip()))
+    if not include or len(include) > 100 or len(exclude) > 100 or any(len(word) > 60 for word in include + exclude):
+        return jsonify({"error": "Use 1–100 include terms and up to 100 exclude terms, each at most 60 characters"}), 400
+    JOB_STORE.set_match_settings(include, exclude)
+    settings = {"include_keywords": include, "exclude_keywords": exclude}
+    with state_lock:
+        state["match_settings"] = settings
+    return jsonify({"ok": True, **settings})
+
+
+@app.post("/api/jobs/<event_key>/stage")
+def api_set_job_stage(event_key):
+    body = request.get_json(silent=True) or {}
+    stage = str(body.get("stage", "")).strip().lower()
+    if stage not in {"new", "saved", "applied", "ignored"}:
+        return jsonify({"error": "Invalid job stage"}), 400
+    with state_lock:
+        if event_key not in state.get("event_keys", set()):
+            return jsonify({"error": "Job not found"}), 404
+    JOB_STORE.set_stage(event_key, stage)
+    with state_lock:
+        state.setdefault("job_stages", {})[event_key] = stage
+    return jsonify({"ok": True, "event_key": event_key, "stage": stage})
 
 
 @app.get("/api/logs")

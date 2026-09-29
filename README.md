@@ -1,10 +1,10 @@
-# OnlineJobs Watcher Bot
+# Aurelius Multi-Source Job Watcher
 
 ## Aurelius web portal (Vercel)
 
 The `frontend/` directory is a Next.js dashboard. Vercel runs the frontend and its protected API routes; the Flask watcher runs separately. Public code users can access only `/jobs`. Supabase Auth verifies the owner, and Supabase Postgres stores hashed access codes. Owner and code checks run on the server. The frontend never sends the Supabase service role key or backend token to the browser.
 
-The watcher keeps a rolling archive of the **5,000 most recently discovered jobs** in `data/job_events.json`. Posted age does not remove a job. When a new discovery would exceed 5,000, the earliest discovered job is removed. The Jobs page shows 100 at a time and searches across the entire stored archive. It refreshes the current page every 30 seconds. Jobs discarded by the older one-hour rule cannot be restored unless the scraper finds them again.
+The watcher keeps a rolling archive of the **5,000 most recently discovered jobs** in SQLite at `data/jobs.sqlite3`, with `data/job_events.json` as a backup. Posted age does not remove a job. When a new discovery would exceed 5,000, the earliest discovered job is removed. The Jobs page shows 100 at a time and searches across the entire stored archive. It refreshes the current page every 30 seconds.
 
 ### 1. Set up Supabase
 
@@ -22,6 +22,7 @@ cd OLJ-scraper
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+python -m playwright install chromium
 $env:BACKEND_API_TOKEN = "your-long-random-secret"
 $env:FRONTEND_ORIGIN = "https://your-project.vercel.app"
 python watcher.py
@@ -52,7 +53,7 @@ Set real values in `.env.local` before signing in. The app is at `http://localho
 
 **Security:** Do not expose the Flask API through a tunnel without `BACKEND_API_TOKEN`. Its original dashboard and control endpoints are powerful. The portal sends the token only from Next.js server routes. The owner's Supabase access cookie expires with the Auth token, after which the owner signs in again.
 
-Simple bot for watching OnlineJobs.ph job posts and sending alerts to Telegram.
+The bot watches OLJ and additional job sources and sends Telegram alerts for new matches.
 
 ## What This Bot Does
 
@@ -203,12 +204,18 @@ Example:
 video editor, social media, content creator, ai automation
 ```
 
+## Multi-source watcher
+
+See [multi-source setup](MULTI_SOURCE_SETUP.md) for connector coverage, source
+controls, Telegram setup, SQLite storage, and local 24/7 operation. The owner
+dashboard shows each source's last result, blocked state, and polling interval.
+
 ## Start Again Later
 
 Next time, you only need:
 
 ```powershell
-cd "D:\RADZ AUTOMATION\onlinejobs-watcher"
+cd "D:\OLJ SCRAPER"
 .\.venv\Scripts\Activate.ps1
 python watcher.py
 ```

@@ -5,7 +5,7 @@ export async function GET(request: NextRequest) {
   if (!await owner() && !await viewer()) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   const params = new URLSearchParams();
   params.set('limit', '100');
-  for (const key of ['offset', 'q', 'keyword', 'status']) {
+  for (const key of ['offset', 'q', 'keyword', 'status', 'source', 'stage', 'date_from', 'date_to', 'notified']) {
     const value = request.nextUrl.searchParams.get(key);
     if (value) params.set(key, value.slice(0, 200));
   }
@@ -17,6 +17,7 @@ export async function GET(request: NextRequest) {
     void site; void site_type; void job_id;
     return {
       ...safe,
+      source: job.site_type === 'onlinejobsph' ? 'OLJ' : String(job.site || ''),
       title: String(job.title || '').replace(/^\[(?:onlinejobsph|olj)\]\s*/i, ''),
       posted_display: String(job.posted_display || '').replace(/\s*\(OLJ(?: DATE UPDATED)?\)$/i, ''),
       ...matchJob(job),
