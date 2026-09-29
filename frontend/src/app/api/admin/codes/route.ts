@@ -16,7 +16,25 @@ export async function POST(request: NextRequest) {
 }
 export async function PATCH(request: NextRequest) {
   if (!await owner()) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-  const { id } = await request.json(); const { error } = await db().from('access_codes').update({ status: 'revoked' }).eq('id', id);
+  const { id, status, expires_at, max_uses } = await request.json();
+  if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) return Response.json({ error: 'Invalid membership' }, { status: 400 });
+  const updates: Record<string, unknown> = {};
+  if (status !== undefined) {
+    if (status !== 'active' && status !== 'revoked') return Response.json({ error: 'Invalid status' }, { status: 400 });
+    updates.status = status;
+  }
+  if (expires_at !== undefined) {
+    const date = expires_at ? new Date(expires_at) : null;
+    if (date && (Number.isNaN(date.getTime()) || date <= new Date())) return Response.json({ error: 'Expiration must be in the future' }, { status: 400 });
+    updates.expires_at = date?.toISOString() || null;
+  }
+  if (max_uses !== undefined) {
+    const max = max_uses === null || max_uses === '' ? null : Number(max_uses);
+    if (max !== null && (!Number.isInteger(max) || max < 1)) return Response.json({ error: 'Invalid maximum sign-ins' }, { status: 400 });
+    updates.max_uses = max;
+  }
+  if (!Object.keys(updates).length) return Response.json({ error: 'No changes supplied' }, { status: 400 });
+  const { error } = await db().from('access_codes').update(updates).eq('id', id);
   return error ? Response.json({ error: error.message }, { status: 500 }) : Response.json({ ok: true });
 }
 export async function DELETE(request: NextRequest) {

@@ -14,10 +14,18 @@ type Source = {
   last_checked_at?: string;
   last_error?: string;
   last_fetched?: number;
+  last_successful_scrape?: string;
+  last_job_discovered?: string;
+  jobs_discovered_today?: number;
+  parse_failures?: number;
+  request_failures?: number;
+  field_coverage?: Record<string, number>;
+  warnings?: string[];
 };
 type Status = Record<string, unknown> & { sources?: Source[] };
 
 export default function StatusPage() {
+  const pht = (value?: string) => value ? new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) + ' PHT' : 'Never';
   const [data, setData] = useState<Status | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -88,13 +96,16 @@ export default function StatusPage() {
         <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">{items.map(([label, value]) => <div className="card p-6" key={String(label)}><div className="text-sm text-[#8d969f]">{String(label)}</div><div className="text-xl font-semibold mt-3 break-words">{String(value)}</div></div>)}</div>
         <h2 className="text-xl font-semibold mt-8 mb-4">Job sources</h2>
         <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">{data?.sources?.map(source => <div className="card p-5" key={source.type}>
-          <div className="flex justify-between gap-2"><div className="font-semibold">{source.name}</div><div className={source.status === 'blocked' || source.status === 'error' ? 'text-xs font-semibold text-amber-700' : 'text-xs font-semibold text-green-700'}>{!source.enabled ? 'Disabled' : source.status === 'blocked' ? 'Blocked' : source.status === 'error' ? 'Error' : source.last_checked_at ? 'Connected' : 'Waiting for first check'}</div></div>
+          <div className="flex justify-between gap-2"><div className="font-semibold">{source.name}</div><div className={source.status === 'healthy' ? 'text-xs font-semibold text-green-700' : 'text-xs font-semibold text-amber-700'}>{!source.enabled ? 'Disabled' : source.status ? source.status.replaceAll('_', ' ').replace(/^./, letter => letter.toUpperCase()) : 'Waiting for first check'}</div></div>
           <div className="text-sm text-[#87919a] mt-3">{source.last_error || String(source.last_fetched ?? 0) + ' public jobs at last check'}</div>
-          <div className="flex items-center gap-3 mt-4"><label className="text-sm flex items-center gap-2"><input type="checkbox" checked={!!source.enabled} onChange={event => void updateSource(source, event.target.checked)}/> Enabled</label><label className="text-xs text-[#7c8791]">Interval <input aria-label={`${source.name} interval in seconds`} className="input ml-1 !w-24 !py-1" type="number" min={source.type === 'onlinejobsph' ? 20 : source.type === 'himalayas' ? 86400 : source.type === 'jobicy' ? 3600 : source.type === 'peopleperhour' || source.type === 'contra' || source.type === 'remotive' ? 1800 : source.type === 'wellfound' ? 120 : 60} defaultValue={source.poll_interval_seconds || 300} key={`${source.type}-${source.poll_interval_seconds}`} onBlur={event => { const seconds = Number(event.target.value); if (seconds !== source.poll_interval_seconds) void updateSource(source, !!source.enabled, seconds); }}/></label><span className="text-xs text-[#9ca4ac]">seconds</span></div>
+          <div className="mt-3 text-xs text-[#74808b] space-y-1"><div>Last successful scrape: {pht(source.last_successful_scrape)}</div><div>Jobs discovered today: {source.jobs_discovered_today ?? 0}</div><div>Last new job: {pht(source.last_job_discovered)}</div><div>Parse failures: {source.parse_failures ?? 0} · Request failures: {source.request_failures ?? 0}</div></div>
+          {!!source.warnings?.length && <div className="mt-3 rounded-lg bg-[#fff4df] p-3 text-xs text-[#865a00]"><div className="font-bold mb-1">Parser warning</div>{source.warnings.map(warning => <div key={warning}>{warning}</div>)}</div>}
+          {!!source.field_coverage && <div className="text-xs text-[#9ca4ac] mt-3">Field coverage: {Object.entries(source.field_coverage).map(([field, coverage]) => `${field} ${Math.round(coverage * 100)}%`).join(' · ')}</div>}
+          <div className="flex items-center gap-3 mt-4"><label className="text-sm flex items-center gap-2"><input type="checkbox" checked={!!source.enabled} onChange={event => void updateSource(source, event.target.checked)}/> Enabled</label><label className="text-xs text-[#7c8791]">Interval <input aria-label={`${source.name} interval in seconds`} className="input ml-1 !w-24 !py-1" type="number" min={source.type === 'onlinejobsph' ? 20 : source.type === 'himalayas' ? 300 : source.type === 'jobicy' ? 3600 : source.type === 'peopleperhour' || source.type === 'contra' || source.type === 'remotive' ? 1800 : source.type === 'wellfound' ? 120 : 60} defaultValue={source.poll_interval_seconds || 300} key={`${source.type}-${source.poll_interval_seconds}`} onBlur={event => { const seconds = Number(event.target.value); if (seconds !== source.poll_interval_seconds) void updateSource(source, !!source.enabled, seconds); }}/></label><span className="text-xs text-[#9ca4ac]">seconds</span></div>
           {source.last_checked_at && <div className="text-xs text-[#9ca4ac] mt-1">Last checked {new Date(source.last_checked_at).toLocaleString()}</div>}
           {source.type === 'remotive' && <div className="text-xs text-[#9ca4ac] mt-2">Collected from public category RSS feeds.</div>}
           {source.type === 'jobicy' && <div className="text-xs text-[#9ca4ac] mt-2">Public feed permits at most one check per hour.</div>}
-          {source.type === 'himalayas' && <div className="text-xs text-[#9ca4ac] mt-2">Public feed updates about once per day.</div>}
+          {source.type === 'himalayas' && <div className="text-xs text-[#9ca4ac] mt-2">Public account-free job feed.</div>}
           {source.url && <a className="inline-block text-xs font-semibold text-[#3a679b] mt-3 hover:underline" href={source.url} target="_blank" rel="noopener noreferrer">Open source ↗</a>}
         </div>)}</div>
       </>}

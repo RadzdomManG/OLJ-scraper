@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 export type CodeRecord = { id: string; code_hash: string; label: string; status: string; expires_at: string | null; max_uses: number | null; used_count: number; created_at: string; created_by: string | null; last_used_at: string | null };
 
@@ -20,6 +20,14 @@ function sign(value: string) {
 export function codeHash(code: string) { return sign(`code:${code.trim().toUpperCase()}`); }
 export function newCode() { return `AUR-${randomBytes(9).toString('hex').toUpperCase()}`; }
 export function sessionValue(id: string) { return `${id}.${sign(`session:${id}`)}`; }
+export const SESSION_MAX_AGE = 60 * 60 * 24 * 400;
+export function ownerTokenHash(token: string) { return createHash('sha256').update(token).digest('hex'); }
+export async function createOwnerSession(userId: string) {
+  const token = randomBytes(32).toString('base64url');
+  const { error } = await db().from('owner_sessions').insert({ token_hash: ownerTokenHash(token), user_id: userId });
+  if (error) throw error;
+  return token;
+}
 
 export async function viewer() {
   const value = (await cookies()).get('aurelius_code')?.value;
@@ -38,9 +46,16 @@ export async function viewer() {
 export async function owner() {
   const token = (await cookies()).get('aurelius_owner')?.value;
   if (!token) return null;
-  const { data, error } = await db().auth.getUser(token);
-  if (error || !data.user || data.user.email?.toLowerCase() !== process.env.OWNER_EMAIL?.toLowerCase()) return null;
-  return data.user;
+  const client = db();
+  const { data: session } = await client.from('owner_sessions').select('user_id,revoked_at').eq('token_hash', ownerTokenHash(token)).maybeSingle();
+  if (session && !session.revoked_at) {
+    const { data, error } = await client.auth.admin.getUserById(session.user_id);
+    if (!error && data.user?.email?.toLowerCase() === process.env.OWNER_EMAIL?.toLowerCase()) return data.user;
+  }
+  // One-time transition for the previous short-lived Supabase access cookie.
+  const { data, error } = await client.auth.getUser(token);
+  if (!error && data.user?.email?.toLowerCase() === process.env.OWNER_EMAIL?.toLowerCase()) return data.user;
+  return null;
 }
 
 export async function backend(path: string, init?: RequestInit) {

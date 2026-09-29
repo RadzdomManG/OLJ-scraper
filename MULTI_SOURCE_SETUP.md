@@ -24,26 +24,27 @@ For unattended use, create a Windows Task Scheduler task:
    **Run task as soon as possible after a scheduled start is missed**.
 5. Keep Windows awake and connected to the internet.
 
-The current website depends
-on the local watcher and its tunnel; a temporary Cloudflare tunnel URL changes
-when restarted, so a stable named tunnel or hosted backend is needed for reliable
-24/7 remote website access.
+The customer jobs page reads the private Supabase mirror, so it continues to show
+stored jobs if the local watcher stops. New discoveries and owner backend controls
+require the watcher to remain online. A temporary Cloudflare tunnel URL changes
+when restarted; use a stable named tunnel or hosted backend for reliable remote
+owner controls.
 
 ## Source coverage
 
 | Source | Method | Default check interval | Current limit |
 | --- | --- | --- | --- |
 | OLJ | Public listing and detail pages | 20 seconds | Existing watcher behavior |
-| Freelancer | Public all-jobs listing page | 1 minute | Listing exposes about 50 recent cards; cards omit exact posting time and client budget |
+| Freelancer | Public all-jobs listing and project detail pages | 1 minute | About 50 recent cards; detail exposes budget but only relative posting time |
 | Wellfound | Public page with Playwright and JobPosting data | 5 minutes | Public landing page covers a limited set of recent listings |
 | Remotive | [Official public category RSS feeds](https://remotive.com/remote-jobs/rss-feed) | 30 minutes | Feed coverage depends on Remotive's public category feeds |
 | PeoplePerHour | Playwright public page probe | 30 minutes | Bot challenge; currently blocked |
 | Contra | Playwright public page probe | 30 minutes | Job feed redirects to login; currently blocked |
 | We Work Remotely | [Official all-jobs RSS](https://weworkremotely.com/remote-job-rss-feed) | 1 minute | Feed publication timing is controlled by the site |
-| Guru | Public newest projects page | 1 minute | Public page exposes only its first 20 projects |
+| Guru | Public newest projects page | 1 minute | HTTP 403 in the latest live probe; historical jobs remain stored |
 | Jobicy | [Official RSS](https://jobicy.com/jobs-rss-feed) | 1 hour | Feed rules prohibit polling more than once per hour |
-| Himalayas | [Official RSS](https://himalayas.app/docs/remote-jobs-rss) | 24 hours | Public feed updates daily and exposes recent listings only |
-| VirtualStaff.ph | Public browser-rendered jobs page | 1 minute | Public page exposes a limited set of job cards |
+| Himalayas | [Public no-key jobs feed](https://himalayas.app/docs/data-dictionary) | 5 minutes | Feed exposes up to 100 recent listings per response; source cadence controls freshness |
+| VirtualStaff.ph | Public browser-rendered jobs and detail responses | 1 minute | Public page exposes a limited set of job cards |
 
 Blocked sources are reported in **Backend Status** and do not fabricate jobs or
 attempt captcha solving or account login. Enable/disable a source and set its interval there.
@@ -60,6 +61,11 @@ blank; the watcher does not infer salary from Freelancer's average bids. Jobs
 appear newest first, with source and stage filters, date and keyword filters,
 and notification status. Owners can mark jobs **Saved**, **Applied**, or
 **Ignored**. The 5,000 newest discoveries remain in the archive.
+
+The watcher mirrors the archive to private Supabase `jobs` records. Customer
+queries apply each customer's saved niches in the database, with source, date,
+salary, work type, and match filters. The browser receives new matching rows
+through a server-side Realtime subscription and also refreshes every 30 seconds.
 
 The owner **Keywords** page edits include and exclude terms for new alerts.
 Collection keeps every job visible on each accessible public listing page,

@@ -19,11 +19,15 @@ from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 import hmac
-from sources import contra, freelancer, guru, himalayas, jobicy, peopleperhour, remotive, virtualstaff, wellfound, weworkremotely
+from sources import contra, freelancer, guru, himalayas, jobicy, peopleperhour, remotive, virtualstaff, wellfound, weworkremotely, detail_jsonld
 from sources.common import SourceBlocked, with_retries
 from job_store import JobStore
+from job_normalizer import source_posted
+from supabase_mirror import sync_jobs, sync_taxonomy, configured as supabase_configured
 
 load_dotenv()
+if __name__ == '__main__':
+    load_dotenv(os.path.join(os.path.dirname(__file__), 'frontend', '.env.local'), override=False)
 
 
 # ======================
@@ -141,7 +145,7 @@ JOB_SITES.extend([
     {"name": "Jobicy", "url": jobicy.FEED_URL,
      "type": "jobicy", "poll_interval_seconds": 3600, "enabled_default": INCLUDE_JOBICY},
     {"name": "Himalayas", "url": himalayas.FEED_URL,
-     "type": "himalayas", "poll_interval_seconds": 86400, "enabled_default": INCLUDE_HIMALAYAS},
+     "type": "himalayas", "poll_interval_seconds": 300, "enabled_default": INCLUDE_HIMALAYAS},
     {"name": "VirtualStaff.ph", "url": virtualstaff.LIST_URL,
      "type": "virtualstaff", "poll_interval_seconds": 60, "enabled_default": INCLUDE_VIRTUALSTAFF},
 ])
@@ -159,7 +163,8 @@ MAX_RETRIES = env_int("MAX_RETRIES", 2)
 TIMEOUT = env_int("TIMEOUT", 20)
 SITE_FETCH_BUDGET_SECONDS = max(5, env_int("SITE_FETCH_BUDGET_SECONDS", 25))
 MAX_STORED_EVENTS = max(1, env_int("MAX_STORED_EVENTS", 5000))
-MAX_DETAIL_FETCH_PER_CYCLE = env_int("MAX_DETAIL_FETCH_PER_CYCLE", 5)
+MAX_DETAIL_FETCH_PER_CYCLE = env_int("MAX_DETAIL_FETCH_PER_CYCLE", 20)
+MAX_DETAIL_FETCH_PER_SOURCE = env_int("MAX_DETAIL_FETCH_PER_SOURCE", 3)
 MAX_LOG_LINES = max(80, env_int("MAX_LOG_LINES", 600))
 
 DATA_DIR = os.environ.get("DATA_DIR", "data")
@@ -951,6 +956,8 @@ def normalize_event(item):
         "company": str(item.get("company", "")).strip(),
         "skills": item.get("skills", []) if isinstance(item.get("skills", []), list) else [],
         "location": str(item.get("location", "")).strip(),
+        "category": str(item.get("category", "")).strip(),
+        "tags": item.get("tags", []) if isinstance(item.get("tags", []), list) else [],
         "remote": item.get("remote", None),
         "company_client": str(item.get("company_client", item.get("company", ""))).strip(),
         "budget_salary": str(item.get("budget_salary", item.get("wage_salary", ""))).strip(),
@@ -993,6 +1000,23 @@ def load_job_events():
 def save_job_events(events):
     JOB_STORE.save_jobs(events)
     save_json_file(EVENTS_FILE, events)
+    schedule_supabase_sync(events)
+
+
+def schedule_supabase_sync(events):
+    if not supabase_configured():
+        return
+    snapshot = list(events)
+
+    def run():
+        try:
+            result = sync_jobs(JOB_STORE, snapshot)
+            if result.get('upserted') or result.get('pruned'):
+                add_runtime_log(f"Supabase mirrored {result.get('upserted', 0)} changed jobs; removed {result.get('pruned', 0)} old jobs.", 'info')
+        except Exception as exc:
+            add_runtime_log(f"Supabase job sync failed: {type(exc).__name__}: {exc}", 'error')
+
+    threading.Thread(target=run, daemon=True, name='supabase-job-sync').start()
 
 
 def normalize_match_text(value):
@@ -1874,18 +1898,21 @@ def fetch_job_detail_onlinejobsph(url):
 def merge_source_details(target, detail):
     """Copy only fields explicitly present on the source posting."""
     changed = False
-    for key in ("description", "type_of_work", "wage_salary", "hours_per_week", "date_updated"):
+    for key in ("description", "type_of_work", "wage_salary", "hours_per_week", "date_updated", "posted_at", "company", "category"):
         new_value = str(detail.get(key, "") or "").strip()
         if new_value and new_value != target.get(key, ""):
             target[key] = new_value
             changed = True
+    if isinstance(detail.get('skills'), list) and detail['skills'] and not target.get('skills'):
+        target['skills'] = detail['skills']
+        changed = True
     target["budget_salary"] = target.get("wage_salary", "")
     target["job_type"] = target.get("type_of_work", "")
     return changed
 
 
 def source_detail_due(event):
-    if event.get("type_of_work") and event.get("wage_salary"):
+    if event.get("type_of_work") and event.get("wage_salary") and event.get("description") and event.get("posted_at"):
         return False
     checked_at = parse_iso_to_utc(str(event.get("detail_checked_at", "")))
     return checked_at is None or (datetime.now(timezone.utc) - checked_at).total_seconds() >= 3600
@@ -2105,7 +2132,7 @@ def build_event(site, job_id, job, age_seconds=None, posted_at_iso="", seen_key=
         "url": job.get("url", "").strip(),
         "description": job.get("description", "").strip(),
         "posted_at": job.get("posted_at", "").strip(),
-        "posted_at_iso": posted_at_iso or (job.get("posted_at", "") if site["type"] in {"remotive", "wellfound", "weworkremotely", "jobicy", "himalayas"} else ""),
+        "posted_at_iso": posted_at_iso or source_posted(job.get("posted_at", ""), site["type"]) or "",
         "detected_at": detected_at,
         "detected_at_local": format_local_time(detected_at, DASHBOARD_TZ),
         "last_seen_at": detected_at,
@@ -2121,6 +2148,8 @@ def build_event(site, job_id, job, age_seconds=None, posted_at_iso="", seen_key=
         "company": str(job.get("company", "")).strip(),
         "skills": job.get("skills", []) if isinstance(job.get("skills", []), list) else [],
         "location": str(job.get("location", "")).strip(),
+        "category": str(job.get("category", "")).strip(),
+        "tags": job.get("tags", []) if isinstance(job.get("tags", []), list) else [],
         "remote": job.get("remote", None),
         "company_client": str(job.get("company", "")).strip(),
         "budget_salary": job.get("wage_salary", "").strip(),
@@ -2220,6 +2249,7 @@ def run_check_cycle():
 
     for site in JOB_SITES:
         site_started_ts = time.time()
+        source_detail_count = 0
         site_summary = {
             "site": site["name"],
             "fetched": 0,
@@ -2252,14 +2282,23 @@ def run_check_cycle():
         except Exception as exc:
             site_summary["errors"] += 1
             add_runtime_log(f"Site fetch error ({site['name']}): {type(exc).__name__}: {exc}", "error")
-            health = {"last_checked_at": now_utc_iso(), "last_error": f"{type(exc).__name__}: {exc}", "last_fetched": 0, "status": "blocked" if isinstance(exc, SourceBlocked) else "error"}
+            with state_lock:
+                previous_health = dict(state.setdefault('source_health', {}).get(site['type'], {}))
+            status = 'authentication_required' if isinstance(exc, SourceBlocked) and 'login' in str(exc).lower() else 'blocked' if isinstance(exc, SourceBlocked) else 'rate_limited' if '429' in str(exc) else 'error'
+            health = {**previous_health, "last_checked_at": now_utc_iso(), "last_error": f"{type(exc).__name__}: {exc}"[:300], "last_fetched": 0, "status": status,
+                      "request_failures": int(previous_health.get('request_failures', 0)) + (0 if isinstance(exc, ValueError) else 1),
+                      "parse_failures": int(previous_health.get('parse_failures', 0)) + (1 if isinstance(exc, ValueError) else 0)}
             with state_lock:
                 state.setdefault("source_health", {})[site["type"]] = health
             JOB_STORE.set_source_health(site["type"], health)
             cycle_summary["sites"].append(site_summary)
             continue
         site_summary["fetched"] = len(jobs)
-        health = {"last_checked_at": now_utc_iso(), "last_error": "", "last_fetched": len(jobs), "status": "ok"}
+        with state_lock:
+            previous_health = dict(state.setdefault('source_health', {}).get(site['type'], {}))
+        health = {**previous_health, "last_checked_at": now_utc_iso(), "last_error": "", "last_fetched": len(jobs), "status": "ok"}
+        if jobs:
+            health['last_successful_scrape'] = health['last_checked_at']
         with state_lock:
             state.setdefault("source_health", {})[site["type"]] = health
         JOB_STORE.set_source_health(site["type"], health)
@@ -2289,8 +2328,8 @@ def run_check_cycle():
                 stored_job = next((dict(item) for item in state["events"] if item.get("event_key") == seen_key), None)
 
             if stored_job:
-                for key in ("description", "type_of_work", "wage_salary", "hours_per_week", "date_updated"):
-                    if stored_job.get(key):
+                for key in ("description", "type_of_work", "wage_salary", "hours_per_week", "date_updated", "posted_at", "company", "skills", "category", "tags"):
+                    if not job.get(key) and stored_job.get(key):
                         job[key] = stored_job[key]
 
             age_seconds = None
@@ -2300,12 +2339,38 @@ def run_check_cycle():
             if site["type"] == "onlinejobsph":
                 age_seconds, posted_at_iso = onlinejobs_posting_info(job)
 
-                if detail_fetch_count < MAX_DETAIL_FETCH_PER_CYCLE and (not stored_job or source_detail_due(stored_job)):
+                if detail_fetch_count < MAX_DETAIL_FETCH_PER_CYCLE and source_detail_count < MAX_DETAIL_FETCH_PER_SOURCE and (not stored_job or source_detail_due(stored_job)):
                     detail = fetch_job_detail_onlinejobsph(job["url"])
                     merge_source_details(job, detail)
                     detail_checked_at = now_utc_iso()
                     detail_fetch_count += 1
+                    source_detail_count += 1
                     cycle_summary["detail_fetches"] = detail_fetch_count
+
+            if site["type"] in {"freelancer", "virtualstaff"} and detail_fetch_count < MAX_DETAIL_FETCH_PER_CYCLE and source_detail_count < MAX_DETAIL_FETCH_PER_SOURCE and (not stored_job or source_detail_due(stored_job)):
+                try:
+                    detail = freelancer.fetch_detail(session, job['url'], timeout=TIMEOUT) if site['type'] == 'freelancer' else virtualstaff.fetch_detail(job_id, timeout=TIMEOUT)
+                    if not detail.get('expired'):
+                        merge_source_details(job, detail)
+                    detail_checked_at = now_utc_iso()
+                    detail_fetch_count += 1
+                    source_detail_count += 1
+                    cycle_summary['detail_fetches'] = detail_fetch_count
+                except Exception as exc:
+                    site_summary['errors'] += 1
+                    add_runtime_log(f"Detail fetch error ({site['name']}): {type(exc).__name__}: {exc}", 'warn')
+
+            if site['type'] in {'jobicy', 'remotive'} and detail_fetch_count < MAX_DETAIL_FETCH_PER_CYCLE and source_detail_count < MAX_DETAIL_FETCH_PER_SOURCE and (not stored_job or source_detail_due(stored_job)):
+                try:
+                    detail = detail_jsonld.fetch_detail(session, job['url'], timeout=TIMEOUT)
+                    merge_source_details(job, detail)
+                    detail_checked_at = now_utc_iso()
+                    detail_fetch_count += 1
+                    source_detail_count += 1
+                    cycle_summary['detail_fetches'] = detail_fetch_count
+                except Exception as exc:
+                    site_summary['errors'] += 1
+                    add_runtime_log(f"Detail fetch error ({site['name']}): {type(exc).__name__}: {exc}", 'warn')
 
             event = build_event(site, job_id, job, age_seconds=age_seconds, posted_at_iso=posted_at_iso, seen_key=seen_key)
             event["detail_checked_at"] = detail_checked_at
@@ -2343,8 +2408,10 @@ def run_check_cycle():
                             existing["title"] = event.get("title", existing.get("title", ""))
                             existing["url"] = event.get("url", existing.get("url", ""))
                             merge_source_details(existing, event)
-                            existing["posted_at"] = event.get("posted_at", existing.get("posted_at", ""))
-                            existing["posted_at_iso"] = event.get("posted_at_iso", existing.get("posted_at_iso", ""))
+                            if event.get("posted_at"):
+                                existing["posted_at"] = event["posted_at"]
+                            if event.get("posted_at_iso"):
+                                existing["posted_at_iso"] = event["posted_at_iso"]
                             existing["detail_checked_at"] = event.get("detail_checked_at", existing.get("detail_checked_at", ""))
                             existing["keyword_matched"] = event.get("keyword_matched", existing.get("keyword_matched", False))
                             existing["job_score"] = event.get("job_score", existing.get("job_score", 0))
@@ -2378,6 +2445,36 @@ def run_check_cycle():
             site_summary["new_events"] += 1
             cycle_summary["new_events"] += 1
 
+        fields = ('description', 'posted_at', 'wage_salary', 'type_of_work', 'company', 'location', 'skills')
+        coverage = {field: round(sum(bool(job.get(field)) for job in jobs.values()) / len(jobs), 3) if jobs else 0 for field in fields}
+        health['field_coverage'] = coverage
+        expected = {'onlinejobsph': ('description', 'posted_at'), 'freelancer': ('description',),
+                    'virtualstaff': ('posted_at', 'wage_salary', 'type_of_work'),
+                    'wellfound': ('description', 'posted_at'), 'remotive': ('description', 'posted_at'),
+                    'weworkremotely': ('description', 'posted_at'), 'jobicy': ('description', 'posted_at'),
+                    'himalayas': ('description', 'posted_at', 'type_of_work')}.get(site['type'], ('description',))
+        warnings = []
+        if len(jobs) >= 5:
+            for field in expected:
+                if coverage[field] < 0.1:
+                    warnings.append(f'{field} missing from nearly all fetched jobs')
+            old_coverage = previous_health.get('field_coverage') or {}
+            for field in fields:
+                if float(old_coverage.get(field, 0)) > 0.5 and coverage[field] < 0.1:
+                    warnings.append(f'{field} coverage dropped suddenly')
+        if site_summary['errors']:
+            warnings.append(f"{site_summary['errors']} detail fetch failures")
+        health['warnings'] = list(dict.fromkeys(warnings))
+        health['status'] = 'partial' if warnings else 'healthy'
+        health['parse_failures'] = int(previous_health.get('parse_failures', 0)) + site_summary['errors']
+        with state_lock:
+            source_events = [item for item in state['events'] if item.get('site_type') == site['type']]
+        today = datetime.now(DASHBOARD_TZ).strftime('%Y-%m-%d')
+        health['jobs_discovered_today'] = sum(str(item.get('detected_at_local', '')).startswith(today) for item in source_events)
+        health['last_job_discovered'] = max((item.get('detected_at', '') for item in source_events), default='')
+        with state_lock:
+            state.setdefault('source_health', {})[site['type']] = health
+        JOB_STORE.set_source_health(site['type'], health)
         cycle_summary["sites"].append(site_summary)
 
     if detail_fetch_count < MAX_DETAIL_FETCH_PER_CYCLE:
@@ -3056,7 +3153,7 @@ def api_update_source(source_type):
     body = request.get_json(silent=True) or {}
     if not isinstance(body.get("enabled"), bool):
         return jsonify({"error": "enabled must be true or false"}), 400
-    minimums = {"onlinejobsph": 20, "freelancer": 60, "wellfound": 120, "remotive": 1800, "peopleperhour": 1800, "contra": 1800, "weworkremotely": 60, "guru": 60, "jobicy": 3600, "himalayas": 86400, "virtualstaff": 60}
+    minimums = {"onlinejobsph": 20, "freelancer": 60, "wellfound": 120, "remotive": 1800, "peopleperhour": 1800, "contra": 1800, "weworkremotely": 60, "guru": 60, "jobicy": 3600, "himalayas": 300, "virtualstaff": 60}
     try:
         interval = int(body.get("interval_seconds", site.get("poll_interval_seconds", CHECK_INTERVAL_SECONDS)))
     except (ValueError, TypeError):
@@ -4046,6 +4143,14 @@ def healthz():
 
 def main():
     initialize_state()
+    if supabase_configured():
+        try:
+            sync_taxonomy()
+            with state_lock:
+                initial_jobs = list(state['events'])
+            schedule_supabase_sync(initial_jobs)
+        except Exception as exc:
+            add_runtime_log(f"Supabase startup sync failed: {type(exc).__name__}: {exc}", 'error')
     try:
         added = startup_backfill_listed_jobs()
         add_runtime_log(f"Startup listing import complete: {added} job(s) loaded.", "info")

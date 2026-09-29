@@ -40,3 +40,23 @@ def fetch(http, urls=SEARCH_URLS, timeout=12):
                 "company": "", "skills": tags, "location": "", "remote": None,
             }
     return jobs
+
+
+def fetch_detail(http, url, timeout=12):
+    """Use the public project page; listing 'average bid' is not the budget."""
+    response = http.get(url, timeout=timeout)
+    response.raise_for_status()
+    soup = BeautifulSoup(response.text, 'lxml')
+    heading = soup.select_one('div.Project-heading-title')
+    if not heading:
+        raise ValueError('Freelancer project detail layout changed')
+    budget = heading.select_one('h2')
+    description = soup.select_one('p.Project-description')
+    posted = heading.select_one('fl-relative-time')
+    payment = heading.select_one('div.mobile\\:hide p') or heading.select_one('p.text-right')
+    return {
+        'wage_salary': budget.get_text(' ', strip=True) if budget else '',
+        'description': description.get_text(' ', strip=True) if description else '',
+        'posted_at': posted.get_text(' ', strip=True) if posted else '',
+        'type_of_work': payment.get_text(' ', strip=True) if payment else '',
+    }

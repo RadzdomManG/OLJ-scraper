@@ -1,4 +1,4 @@
-import { db, codeHash, sessionValue, type CodeRecord } from '@/lib/server';
+import { db, codeHash, sessionValue, SESSION_MAX_AGE, type CodeRecord } from '@/lib/server';
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
     const { data: admitted, error: admissionError } = await client.rpc('admit_access_code', { p_id: data.id });
     if (admissionError || !admitted) return NextResponse.json({ error: 'Code is no longer available' }, { status: 401 });
     const response = NextResponse.json({ ok: true });
-    response.cookies.set('aurelius_code', sessionValue(data.id), { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/', maxAge: 60 * 60 * 24 * 30 });
+    response.cookies.set('aurelius_code', sessionValue(data.id), { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/', maxAge: SESSION_MAX_AGE });
     return response;
   } catch { return NextResponse.json({ error: 'Unable to verify code' }, { status: 500 }); }
 }

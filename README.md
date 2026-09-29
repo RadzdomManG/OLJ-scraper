@@ -2,15 +2,17 @@
 
 ## Aurelius web portal (Vercel)
 
-The `frontend/` directory is a Next.js dashboard. Vercel runs the frontend and its protected API routes; the Flask watcher runs separately. Public code users can access only `/jobs`. Supabase Auth verifies the owner, and Supabase Postgres stores hashed access codes. Owner and code checks run on the server. The frontend never sends the Supabase service role key or backend token to the browser.
+The `frontend/` directory is a Next.js dashboard. Vercel runs the frontend and its protected API routes; the Flask watcher runs separately. Access-code customers can use `/jobs` and `/preferences`; owner administration stays behind Supabase Auth. Supabase Postgres stores hashed access codes and private niche preferences. Owner and code checks run on the server. The frontend never sends the Supabase service role key or backend token to the browser.
 
-The watcher keeps a rolling archive of the **5,000 most recently discovered jobs** in SQLite at `data/jobs.sqlite3`, with `data/job_events.json` as a backup. Posted age does not remove a job. When a new discovery would exceed 5,000, the earliest discovered job is removed. The Jobs page shows 100 at a time and searches across the entire stored archive. It refreshes the current page every 30 seconds.
+The watcher keeps a rolling archive of the **5,000 most recently discovered jobs** in SQLite at `data/jobs.sqlite3`, with `data/job_events.json` as a backup. Posted age does not remove a job. When a new discovery would exceed 5,000, the earliest discovered job is removed. The Jobs page loads 100 at a time with a **Load more jobs** button; searches query the entire stored archive. The top of the list refreshes every 30 seconds.
 
 ### 1. Set up Supabase
 
 Create a Supabase project, run [`supabase/schema.sql`](supabase/schema.sql) in its SQL editor, and create the owner account under Authentication → Users. Disable public signups for an owner-only portal. Set `OWNER_EMAIL` to the exact owner account email. The owner password stays in Supabase Auth; there is no `OWNER_PASSWORD_HASH` when using this method.
 
 Access codes are displayed only when created. Copy them then; the database stores only a keyed hash. Revoking or deleting a code immediately invalidates its viewer sessions. `max_uses` counts successful new code logins, not page refreshes. Existing sessions remain valid after the use limit is reached until the code is revoked or expires.
+
+Create one access code per customer. The owner can set or edit its expiration and revoke access. On first sign-in, customers choose from 31 niche suggestions and may add custom keywords. They can edit those choices later through **My niche** without entering the code again while their membership is active. Their jobs page shows only selected niches. **80% MATCH** is yellow and **PERFECT MATCH** is green; these are classification signals, not verified fit percentages. Customers can filter by source, date, work type, pay, and match strength. The customer API excludes internal event identifiers, owner alerts, and access codes. Original job links remain available. Owner and customer sessions persist across browser visits. An expired or revoked customer code loses access immediately on the server; the open page checks every 30 seconds and redirects to sign-in.
 
 ### 2. Run the Flask backend
 
@@ -51,7 +53,11 @@ npm run dev
 
 Set real values in `.env.local` before signing in. The app is at `http://localhost:3000`. Run `npm run lint` and `npm run build` before deployment. `.env` files are gitignored.
 
-**Security:** Do not expose the Flask API through a tunnel without `BACKEND_API_TOKEN`. Its original dashboard and control endpoints are powerful. The portal sends the token only from Next.js server routes. The owner's Supabase access cookie expires with the Auth token, after which the owner signs in again.
+For local membership smoke checks, run `node scripts/smoke-membership.mjs` from `frontend/` with the app and watcher running. It creates a temporary code, checks authorization, preferences, job visibility, use limits, and expiry, then deletes the code. Run `python scripts/smoke-browser.py` for a browser check of onboarding, niche editing, and Load more. After `npm run build`, run `node scripts/smoke-owner.mjs` to test owner login and membership creation, editing, revocation, and deletion using a temporary owner account and isolated local port 3001. The scripts require the service role key in `.env.local` and should only be run against your own project.
+
+**Security:** Do not expose the Flask API through a tunnel without `BACKEND_API_TOKEN`. Its original dashboard and control endpoints are powerful. The portal sends the token only from Next.js server routes. Owner sessions use revocable, server-stored token hashes and long-lived HttpOnly cookies. Customer code expiry is checked on each protected request.
+
+The watcher mirrors the 5,000-job rolling archive to the private Supabase `jobs` table. The frontend reads those records through authorized server routes and uses a server-side Realtime subscription for new inserts, with 30-second refresh as recovery. The watcher must stay running for new jobs to arrive. Source sites publish at their own pace; a 20-second scan loop does not make their posting feeds update every 20 seconds. See [launch audit](LAUNCH_AUDIT.md) and [source data audit](SOURCE_DATA_AUDIT.md) for verified coverage and limitations.
 
 The bot watches OLJ and additional job sources and sends Telegram alerts for new matches.
 

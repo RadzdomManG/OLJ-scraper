@@ -17,3 +17,5 @@ data/browser_profiles/
 !data/.gitkeep
 !data/telegram_settings.example.json
 .vercel
+.deploy-staging/
+data/*.err

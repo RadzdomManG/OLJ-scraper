@@ -1,6 +1,7 @@
 """VirtualStaff.ph's browser-visible public jobs page."""
 
 import re
+import requests
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
@@ -57,3 +58,36 @@ def fetch(timeout_ms=20000):
             return parse(page.content())
         finally:
             browser.close()
+
+
+def fetch_detail(job_id, timeout=15):
+    """Read the same public job detail response used by the source website."""
+    response = requests.post('https://www.virtualstaff.ph/api/external/individual-job', json={'id': str(job_id)}, timeout=timeout)
+    response.raise_for_status()
+    payload = response.json()
+    item = payload.get('result') if payload.get('status') else None
+    if not isinstance(item, dict) or str(item.get('_id')) != str(job_id):
+        raise ValueError('VirtualStaff detail response did not match the job')
+    if item.get('is_deleted') or item.get('is_expired'):
+        return {'expired': True}
+    description = str(item.get('description') or item.get('job_description') or '').strip()
+    if not description and isinstance(item.get('questionnaire'), list):
+        details = []
+        for entry in item['questionnaire']:
+            question = str(entry.get('question') or '').strip()
+            answer = entry.get('answer')
+            answer = ', '.join(str(value) for value in answer) if isinstance(answer, list) else str(answer or '').strip()
+            if question and answer:
+                details.append(f'{question}\n{answer}')
+        description = '\n\n'.join(details)
+    amount = item.get('monthly_salary_php')
+    salary = f'₱{amount:,.0f}/month' if isinstance(amount, (int, float)) and amount > 0 else ''
+    return {
+        'description': description,
+        'posted_at': str(item.get('created_time') or '').strip(),
+        'wage_salary': salary,
+        'type_of_work': str(item.get('job_type') or '').replace('_', ' ').title(),
+        'company': str(item.get('created_by') or '').strip(),
+        'skills': [str(skill.get('name') or skill.get('skill') or '').strip() for skill in item.get('skills', []) if isinstance(skill, dict)],
+        'expired': False,
+    }

@@ -47,6 +47,10 @@ class JobStore:
                     source TEXT PRIMARY KEY,
                     payload TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS supabase_sync (
+                    event_key TEXT PRIMARY KEY,
+                    digest TEXT NOT NULL
+                );
             """)
 
     @contextmanager
@@ -94,6 +98,8 @@ class JobStore:
                     db.execute("UPDATE source_settings SET interval_seconds = 1800 WHERE source = 'remotive' AND interval_seconds = 21600")
                 if source == "freelancer" and interval == 60:
                     db.execute("UPDATE source_settings SET interval_seconds = 60 WHERE source = 'freelancer' AND interval_seconds = 120")
+                if source == "himalayas" and interval == 300:
+                    db.execute("UPDATE source_settings SET interval_seconds = 300 WHERE source = 'himalayas' AND interval_seconds = 86400")
             rows = db.execute("SELECT source, enabled, interval_seconds FROM source_settings").fetchall()
         return {source: {"enabled": bool(enabled), "interval_seconds": interval} for source, enabled, interval in rows}
 
@@ -124,6 +130,21 @@ class JobStore:
                 "ON CONFLICT(source) DO UPDATE SET payload=excluded.payload",
                 (source, json.dumps(health, ensure_ascii=False)),
             )
+
+    def sync_digests(self):
+        with self.connect() as db:
+            return dict(db.execute("SELECT event_key, digest FROM supabase_sync"))
+
+    def set_sync_digests(self, pairs):
+        with self.connect() as db:
+            db.executemany(
+                "INSERT INTO supabase_sync(event_key,digest) VALUES (?,?) "
+                "ON CONFLICT(event_key) DO UPDATE SET digest=excluded.digest", pairs,
+            )
+
+    def remove_sync_digests(self, keys):
+        with self.connect() as db:
+            db.executemany("DELETE FROM supabase_sync WHERE event_key=?", ((key,) for key in keys))
 
     def match_settings(self):
         with self.connect() as db:
