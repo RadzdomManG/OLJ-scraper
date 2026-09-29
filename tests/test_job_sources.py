@@ -26,25 +26,23 @@ class Http:
 
 
 class JobSourceTest(unittest.TestCase):
-    def test_freelancer_uses_current_card_and_skips_unrelated_jobs(self):
+    def test_freelancer_uses_current_card_and_keeps_all_jobs(self):
         html = '''<div class="JobSearchCard-item"><a class="JobSearchCard-primary-heading-link" href="/projects/ai-video/comfyui-flux-film-123">ComfyUI FLUX filmmaker</a><p class="JobSearchCard-primary-description">Create AI video with LoRA.</p></div>
         <div class="JobSearchCard-item"><a class="JobSearchCard-primary-heading-link" href="/projects/data-entry/typing-456">Data entry clerk</a></div>'''
         jobs = fetch_freelancer_jobs(Http(Response(text=html)), ["https://www.freelancer.com/jobs/ai-video/"])
-        self.assertEqual(len(jobs), 1)
-        job = next(iter(jobs.values()))
+        self.assertEqual(len(jobs), 2)
+        job = next(job for job in jobs.values() if "ComfyUI" in job["title"])
         self.assertEqual(job["title"], "ComfyUI FLUX filmmaker")
         self.assertEqual(job["wage_salary"], "")
         self.assertTrue(job["url"].startswith("https://www.freelancer.com/projects/"))
 
-    def test_remotive_uses_only_source_salary_and_posting_date(self):
-        payload = {"jobs": [
-            {"id": 42, "title": "AI Video Creator", "url": "https://remotive.com/remote-jobs/ai-video-42", "description": "<p>Build films in ComfyUI.</p>", "publication_date": "2026-09-28T10:00:00", "salary": "$50k-$70k", "job_type": "contract"},
-            {"id": 43, "title": "Customer Support", "url": "https://remotive.com/remote-jobs/support-43", "description": "<p>Answer email.</p>"},
-        ]}
-        jobs = fetch_remotive_jobs(Http(Response(payload=payload)))
-        self.assertEqual(list(jobs), ["42"])
+    def test_remotive_rss_keeps_all_jobs_and_source_fields(self):
+        from sources.remotive import parse_feed
+        feed = b'''<rss><channel><item><jobId>42</jobId><title>AI Video Creator</title><link>https://remotive.com/remote-jobs/ai-video-42</link><description>&lt;p&gt;Build films in ComfyUI.&lt;/p&gt;</description><pubDate>Mon, 28 Sep 2026 10:00:00 GMT</pubDate><salary>$50k-$70k</salary><type>contract</type></item><item><jobId>43</jobId><title>Customer Support</title><link>https://remotive.com/remote-jobs/support-43</link></item></channel></rss>'''
+        jobs = parse_feed(feed)
+        self.assertEqual(set(jobs), {"42", "43"})
         self.assertEqual(jobs["42"]["wage_salary"], "$50k-$70k")
-        self.assertEqual(jobs["42"]["posted_at"], "2026-09-28T10:00:00")
+        self.assertTrue(jobs["42"]["posted_at"].startswith("2026-09-28T10:00:00"))
 
     def test_wellfound_reads_source_jobposting_fields(self):
         html = '''<script type="application/ld+json">{"@type":"JobPosting","title":"AI Video Filmmaker","identifier":{"value":"77"},"description":"<p>Build ComfyUI films</p>","datePosted":"2026-09-29T01:00:00Z","employmentType":"CONTRACT","hiringOrganization":{"name":"Film Studio"},"baseSalary":{"currency":"USD","value":{"minValue":50000,"maxValue":70000,"unitText":"YEAR"}},"jobLocationType":"TELECOMMUTE"}</script>'''

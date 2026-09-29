@@ -6,11 +6,10 @@ from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-from .common import SourceBlocked, is_generation_job
+from .common import SourceBlocked
 
 
 LIST_URL = "https://wellfound.com/jobs"
-POSSIBLE_TITLES = re.compile(r"\b(ai|video|creative|automation|image|visual|film|motion|generative)\b", re.I)
 
 
 def parse_job_posting(html, url):
@@ -26,8 +25,6 @@ def parse_job_posting(html, url):
             continue
         title = str(record.get("title") or "").strip()
         description = BeautifulSoup(str(record.get("description") or ""), "lxml").get_text(" ", strip=True)
-        if not is_generation_job(title, description):
-            return None
         identifier = record.get("identifier") or {}
         job_id = str(identifier.get("value") or "").strip()
         if not job_id:
@@ -66,7 +63,7 @@ def parse_job_posting(html, url):
     return None
 
 
-def fetch(timeout_ms=15000, detail_limit=12):
+def fetch(timeout_ms=15000, detail_limit=50):
     from playwright.sync_api import sync_playwright
 
     jobs = {}
@@ -82,7 +79,7 @@ def fetch(timeout_ms=15000, detail_limit=12):
             for link in soup.select('a[href^="/jobs/"]'):
                 title = link.get_text(" ", strip=True)
                 href = link.get("href", "")
-                if re.match(r"^/jobs/\d+", href) and POSSIBLE_TITLES.search(title):
+                if title and re.match(r"^/jobs/\d+", href):
                     candidates.append(urljoin(LIST_URL, href))
             if not candidates and "one more step" in soup.get_text(" ", strip=True).lower():
                 raise SourceBlocked("Wellfound returned a security challenge")

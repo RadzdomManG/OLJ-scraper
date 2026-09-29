@@ -1,36 +1,77 @@
-from urllib.parse import urlparse
+"""Read Remotive's public category RSS feeds without an API or account."""
+
+import hashlib
+import random
+import time
+from email.utils import parsedate_to_datetime
+from urllib.parse import urljoin, urlparse
+from xml.etree import ElementTree
 
 from bs4 import BeautifulSoup
 
-from .common import is_generation_job
+
+FEED_INDEX_URL = "https://remotive.com/remote-jobs/rss-feed"
+FEED_PREFIX = "/remote-jobs/feed/"
 
 
-API_URL = "https://remotive.com/api/remote-jobs"
+def feed_urls(html):
+    soup = BeautifulSoup(html, "lxml")
+    urls = []
+    for anchor in soup.select("a[href]"):
+        url = urljoin(FEED_INDEX_URL, anchor["href"])
+        parsed = urlparse(url)
+        if parsed.hostname in {"remotive.com", "www.remotive.com"} and parsed.path.startswith(FEED_PREFIX):
+            urls.append(url)
+    return list(dict.fromkeys(urls))
 
 
-def fetch(http, url=API_URL, timeout=20):
-    response = http.get(url, timeout=timeout)
-    response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload.get("jobs"), list):
-        raise ValueError("Remotive response has no jobs list")
+def parse_feed(content):
+    root = ElementTree.fromstring(content)
+    if root.tag != "rss":
+        raise ValueError("Remotive did not return an RSS feed")
     jobs = {}
-    for item in payload["jobs"]:
-        title = str(item.get("title") or "").strip()
-        description = BeautifulSoup(str(item.get("description") or ""), "lxml").get_text(" ", strip=True)
-        if not title or not is_generation_job(title, description):
+    for item in root.findall("./channel/item"):
+        def field(tag):
+            return (item.findtext(tag) or "").strip()
+
+        title, url = field("title"), field("link")
+        if not title or urlparse(url).hostname not in {"remotive.com", "www.remotive.com"}:
             continue
-        job_id = str(item.get("id") or "").strip()
-        url = str(item.get("url") or "").strip()
-        if not job_id or urlparse(url).hostname not in {"remotive.com", "www.remotive.com"}:
-            continue
+        job_id = field("jobId") or hashlib.sha256(url.encode("utf-8")).hexdigest()[:24]
+        posted = field("pubDate")
+        if posted:
+            try:
+                posted = parsedate_to_datetime(posted).isoformat()
+            except (TypeError, ValueError):
+                posted = ""
         jobs[job_id] = {
-            "title": title, "url": url, "description": description,
-            "posted_at": str(item.get("publication_date") or "").strip(),
-            "type_of_work": str(item.get("job_type") or "").replace("_", " ").strip(),
-            "wage_salary": str(item.get("salary") or "").strip(), "hours_per_week": "",
-            "company": str(item.get("company_name") or "").strip(),
-            "skills": [], "location": str(item.get("candidate_required_location") or "").strip(),
+            "title": title, "url": url,
+            "description": BeautifulSoup(field("description"), "lxml").get_text(" ", strip=True),
+            "posted_at": posted, "type_of_work": field("type").replace("_", " "),
+            "wage_salary": field("salary"), "hours_per_week": "",
+            "company": field("company"), "skills": [], "location": field("location"),
             "remote": True,
         }
+    return jobs
+
+
+def fetch(http, index_url=FEED_INDEX_URL, timeout=20):
+    response = http.get(index_url, timeout=timeout)
+    response.raise_for_status()
+    urls = feed_urls(response.text)
+    if not urls:
+        raise ValueError("Remotive has no public category feed links")
+    jobs = {}
+    errors = []
+    for index, url in enumerate(urls):
+        if index:
+            time.sleep(random.uniform(0.15, 0.4))
+        try:
+            feed = http.get(url, timeout=timeout)
+            feed.raise_for_status()
+            jobs.update(parse_feed(feed.content))
+        except Exception as exc:
+            errors.append(f"{urlparse(url).path}: {exc}")
+    if errors:
+        raise RuntimeError("Remotive category feeds failed: " + "; ".join(errors[:3]))
     return jobs

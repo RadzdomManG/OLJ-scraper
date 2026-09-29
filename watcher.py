@@ -123,8 +123,8 @@ JOB_SITES.extend([
      "type": "freelancer", "poll_interval_seconds": 120, "enabled_default": INCLUDE_FREELANCER},
     {"name": "Wellfound", "url": wellfound.LIST_URL,
      "type": "wellfound", "poll_interval_seconds": 300, "enabled_default": INCLUDE_WELLFOUND},
-    {"name": "Remotive", "url": remotive.API_URL,
-     "type": "remotive", "poll_interval_seconds": 21600, "enabled_default": INCLUDE_REMOTIVE},
+    {"name": "Remotive", "url": remotive.FEED_INDEX_URL,
+     "type": "remotive", "poll_interval_seconds": 1800, "enabled_default": INCLUDE_REMOTIVE},
     {"name": "PeoplePerHour", "url": peopleperhour.LIST_URL,
      "type": "peopleperhour", "poll_interval_seconds": 1800, "enabled_default": INCLUDE_PEOPLEPERHOUR},
     {"name": "Contra", "url": contra.LIST_URL,
@@ -3019,7 +3019,7 @@ def api_update_source(source_type):
     body = request.get_json(silent=True) or {}
     if not isinstance(body.get("enabled"), bool):
         return jsonify({"error": "enabled must be true or false"}), 400
-    minimums = {"onlinejobsph": 20, "freelancer": 60, "wellfound": 120, "remotive": 21600, "peopleperhour": 1800, "contra": 1800}
+    minimums = {"onlinejobsph": 20, "freelancer": 60, "wellfound": 120, "remotive": 1800, "peopleperhour": 1800, "contra": 1800}
     try:
         interval = int(body.get("interval_seconds", site.get("poll_interval_seconds", CHECK_INTERVAL_SECONDS)))
     except (ValueError, TypeError):

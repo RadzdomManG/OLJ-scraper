@@ -33,14 +33,14 @@ when restarted, so a stable named tunnel or hosted backend is needed for reliabl
 | Source | Method | Default check interval | Current limit |
 | --- | --- | --- | --- |
 | OLJ | Public listing and detail pages | 20 seconds | Existing watcher behavior |
-| Freelancer | Public AI video and ComfyUI listing pages | 2 minutes | Cards omit exact posting time and client budget |
+| Freelancer | Public all-jobs listing page | 2 minutes | Listing exposes about 50 recent cards; cards omit exact posting time and client budget |
 | Wellfound | Public page with Playwright and JobPosting data | 5 minutes | Public landing page covers a limited set of recent listings |
-| Remotive | [Official public API](https://remotive.com/remote-jobs/api) | 6 hours | Public jobs arrive 24 hours late; API recommends at most 4 checks/day |
+| Remotive | [Official public category RSS feeds](https://remotive.com/remote-jobs/rss-feed) | 30 minutes | Feed coverage depends on Remotive's public category feeds |
 | PeoplePerHour | Playwright public page probe | 30 minutes | Bot challenge; currently blocked |
 | Contra | Playwright public page probe | 30 minutes | Job feed redirects to login; currently blocked |
 
 Blocked sources are reported in **Backend Status** and do not fabricate jobs or
-attempt captcha solving. Enable/disable a source and set its interval there.
+attempt captcha solving or account login. Enable/disable a source and set its interval there.
 The allowed minimums protect the source's access limits. Manual scans respect
 those source intervals.
 
@@ -55,6 +55,8 @@ and notification status. Owners can mark jobs **Saved**, **Applied**, or
 **Ignored**. The 5,000 newest discoveries remain in the archive.
 
 The owner **Keywords** page edits include and exclude terms for new alerts.
+Collection keeps every job visible on each accessible public listing page,
+including jobs outside your niche. Keywords control alerts, not collection.
 Only newly discovered matching jobs can notify. The first fetch from a newly
 enabled external source establishes a baseline without sending a backlog of
 alerts. Later new matching jobs send Telegram messages with source, title,

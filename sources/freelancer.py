@@ -5,12 +5,8 @@ from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-from .common import is_generation_job
-
-
 SEARCH_URLS = (
-    "https://www.freelancer.com/jobs/ai-video/",
-    "https://www.freelancer.com/job-search/comfyui/",
+    "https://www.freelancer.com/jobs/",
 )
 
 
@@ -37,8 +33,6 @@ def fetch(http, urls=SEARCH_URLS, timeout=12):
             description_tag = card.select_one("p.JobSearchCard-primary-description")
             description = description_tag.get_text(" ", strip=True) if description_tag else ""
             tags = [tag.get_text(" ", strip=True) for tag in card.select("a.JobSearchCard-primary-tagsLink")]
-            if not is_generation_job(title, description + " " + " ".join(tags)):
-                continue
             job_id = hashlib.sha256(path.encode("utf-8")).hexdigest()[:24]
             jobs[job_id] = {
                 "title": title, "url": full_url, "description": description,

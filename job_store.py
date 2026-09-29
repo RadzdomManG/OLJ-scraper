@@ -82,6 +82,8 @@ class JobStore:
         with self.connect() as db:
             for source, enabled, interval in defaults:
                 db.execute("INSERT OR IGNORE INTO source_settings VALUES (?, ?, ?)", (source, int(enabled), int(interval)))
+                if source == "remotive" and interval == 1800:
+                    db.execute("UPDATE source_settings SET interval_seconds = 1800 WHERE source = 'remotive' AND interval_seconds = 21600")
             rows = db.execute("SELECT source, enabled, interval_seconds FROM source_settings").fetchall()
         return {source: {"enabled": bool(enabled), "interval_seconds": interval} for source, enabled, interval in rows}
 
