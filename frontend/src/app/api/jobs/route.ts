@@ -27,12 +27,12 @@ export async function GET(request: NextRequest) {
   const offset = Number(search.get('offset') || 0);
   const safeOffset = Number.isSafeInteger(offset) && offset >= 0 && offset <= 5000 ? offset : 0;
   const selectedNiche = clean(search.get('niche'));
-  const sort = isOwner ? clean(search.get('sort')) : 'detected';
+  const sort = clean(search.get('sort'));
   let query = db().from('jobs').select(FIELDS, { count: 'exact' });
   if (isOwner && selectedNiche && validNicheIds.has(selectedNiche)) query = query.contains('niches', [selectedNiche]);
 
   const q = safeSearch(clean(search.get('q') || search.get('keyword'), 100));
-  if (q) query = query.or('title.ilike.%' + q + '%,description.ilike.%' + q + '%');
+  if (q) query = query.or('title.ilike.%' + q + '%,description.ilike.%' + q + '%,company.ilike.%' + q + '%,category.ilike.%' + q + '%');
   const source = clean(search.get('source'));
   if (isOwner && source && /^[a-z0-9_-]+$/.test(source)) query = query.eq('source', source);
   if (isOwner && clean(search.get('stage'))) query = query.eq('stage', clean(search.get('stage')));
@@ -55,13 +55,34 @@ export async function GET(request: NextRequest) {
   if (isOwner && since && !Number.isNaN(Date.parse(since))) query = query.gte('first_seen_at', since);
   const after = clean(search.get('after'), 40);
   if (isOwner && after && !Number.isNaN(Date.parse(after))) query = query.gt('first_seen_at', after);
-  if (sort === 'posted') query = query.order('source_posted_at', { ascending: false, nullsFirst: false }).order('first_seen_at', { ascending: false });
+  if (isOwner && sort === 'priority') query = query.order('owner_score', { ascending: false, nullsFirst: false }).order('first_seen_at', { ascending: false });
+  else if (sort === 'posted') query = query.order('source_posted_at', { ascending: false, nullsFirst: false }).order('first_seen_at', { ascending: false });
   else if (sort === 'salary' && currency && period) query = query.order('salary_max', { ascending: false, nullsFirst: false }).order('first_seen_at', { ascending: false });
   else query = query.order('first_seen_at', { ascending: false });
-  query = query.range(safeOffset, safeOffset + PAGE_SIZE - 1);
-  const { data, error, count } = await query;
-  if (error) return Response.json({ error: 'Unable to load jobs' }, { status: 500 });
-  const rows: Record<string, unknown>[] = Array.isArray(data) ? data : [];
+  let rows: Record<string, unknown>[] = [];
+  let total = 0;
+  if (!isOwner && sort === 'priority') {
+    // Customer scores depend on their private niche selection, so rank the full
+    // archive before slicing. Sorting only one fetched page hides older matches.
+    for (let start = 0; start < 5000; start += 1000) {
+      const { data, error, count } = await query.range(start, start + 999);
+      if (error) return Response.json({ error: 'Unable to load jobs' }, { status: 500 });
+      const batch: Record<string, unknown>[] = Array.isArray(data) ? data : [];
+      if (start === 0) total = count || 0;
+      rows.push(...batch);
+      if (batch.length < 1000) break;
+    }
+    rows.sort((left, right) => {
+      const scoreDifference = customerMatch(right, preferences).match_score - customerMatch(left, preferences).match_score;
+      return scoreDifference || Date.parse(String(right.first_seen_at || '')) - Date.parse(String(left.first_seen_at || ''));
+    });
+    rows = rows.slice(safeOffset, safeOffset + PAGE_SIZE);
+  } else {
+    const { data, error, count } = await query.range(safeOffset, safeOffset + PAGE_SIZE - 1);
+    if (error) return Response.json({ error: 'Unable to load jobs' }, { status: 500 });
+    rows = Array.isArray(data) ? data : [];
+    total = count || 0;
+  }
   const jobs = rows.map((job: Record<string, unknown>) => {
     const title = String(job.title || '').replace(/^\[(?:onlinejobsph|olj)\]\s*/i, '');
     if (isOwner) return { ...job, url: job.source_url, source: job.source, title,
@@ -81,5 +102,5 @@ export async function GET(request: NextRequest) {
     };
     return { ...safe, ...customerMatch(job, preferences) };
   });
-  return Response.json({ jobs, count: jobs.length, total: count || 0, filtered_count: count || 0, offset: safeOffset }, { headers: { 'Cache-Control': 'no-store' } });
+  return Response.json({ jobs, count: jobs.length, total, filtered_count: total, offset: safeOffset }, { headers: { 'Cache-Control': 'no-store' } });
 }
