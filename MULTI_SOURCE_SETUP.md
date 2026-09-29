@@ -44,6 +44,7 @@ attempt captcha solving or account login. Enable/disable a source and set its in
 The allowed minimums protect the source's access limits. Manual scans respect
 those source intervals.
 
+
 ## Jobs and alerts
 
 All discovered jobs share a source, title, company/client, description,

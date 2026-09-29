@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 from .common import SourceBlocked, public_page
 
 
-LIST_URL = "https://www.peopleperhour.com/freelance-jobs/artificial-intelligence"
+LIST_URL = "https://www.peopleperhour.com/freelance-jobs"
 
 
 def fetch():

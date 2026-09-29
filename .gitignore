@@ -13,6 +13,7 @@ write_test.tmp
 data/*.json
 data/*.sqlite3*
 data/runtime_check/
+data/browser_profiles/
 !data/.gitkeep
 !data/telegram_settings.example.json
 .vercel
